@@ -3,6 +3,11 @@
 All notable changes to `allure-testops-mcp` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use [SemVer](https://semver.org/).
 
+## [0.1.2] — 2026-04-18
+
+Same audit-hardening changes originally targeted at 0.1.1, re-tagged because
+0.1.1 was claimed on PyPI by an earlier CI attempt before the fixes landed.
+
 ## [0.1.1] — 2026-04-18
 
 ### Added
