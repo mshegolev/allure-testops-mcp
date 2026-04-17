@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.mshegolev/allure-testops-mcp",
+  "description": "Allure TestOps MCP — projects, launches, test cases, test results via REST API.",
+  "repository": {
+    "url": "https://github.com/mshegolev/allure-testops-mcp",
+    "source": "github"
+  },
+  "version": "0.1.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "allure-testops-mcp",
+      "version": "0.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "ALLURE_URL",
+          "description": "Allure TestOps URL (e.g. https://allure.example.com)",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "ALLURE_TOKEN",
+          "description": "API token from Allure TestOps (Profile -> API tokens)",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "ALLURE_SSL_VERIFY",
+          "description": "Verify SSL certificates (true/false). Set to 'false' for self-signed corp certs.",
+          "isRequired": false,
+          "format": "string",
+          "default": "true"
+        }
+      ]
+    }
+  ]
+}

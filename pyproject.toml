@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "allure-testops-mcp"
+version = "0.1.0"
+description = "MCP server for Allure TestOps — projects, launches, test cases, test results"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Mikhail Shchegolev" },
+]
+keywords = ["mcp", "allure", "allure-testops", "testing", "qa", "claude", "anthropic"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Testing",
+    "Topic :: Software Development :: Quality Assurance",
+]
+dependencies = [
+    "mcp>=1.2",
+    "requests>=2.31",
+    "urllib3>=2.0",
+    "pydantic>=2.0",
+    "typing-extensions>=4.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7",
+    "ruff>=0.5",
+    "responses>=0.25",
+]
+
+[project.scripts]
+allure-testops-mcp = "allure_testops_mcp.server:main"
+
+[project.urls]
+Homepage = "https://github.com/mshegolev/allure-testops-mcp"
+Issues = "https://github.com/mshegolev/allure-testops-mcp/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/allure_testops_mcp"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
