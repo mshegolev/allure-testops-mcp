@@ -3,12 +3,25 @@
 6 read-only tools covering the main REST API surface — projects, launches,
 test cases, test results. All tools declare ``readOnlyHint: True`` so MCP
 clients do not ask for per-call confirmation.
+
+**Threading model.**
+
+* ``allure_list_projects``, ``allure_list_launches``, ``allure_get_test_results``
+  are synchronous ``def`` — FastMCP runs them in a worker thread via
+  ``anyio.to_thread.run_sync`` so the asyncio event loop isn't blocked.
+* ``allure_get_project_statistics``, ``allure_search_failed_tests``,
+  ``allure_list_test_cases`` are ``async def`` — they take an MCP ``Context``
+  and emit ``ctx.info`` / ``ctx.report_progress`` events during multi-call
+  operations. Synchronous HTTP calls inside async tools are wrapped with
+  ``asyncio.to_thread`` explicitly.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+import asyncio
+from typing import Annotated, Any, Literal
 
+from mcp.server.fastmcp import Context
 from pydantic import Field
 
 from allure_testops_mcp import output
@@ -25,6 +38,51 @@ from allure_testops_mcp.models import (
     TestResultSummary,
     TestResultsOutput,
 )
+
+
+# ── Small response-shaping helpers (DRY) ────────────────────────────────────
+
+
+_STAT_KEYS = ("passed", "failed", "broken", "skipped", "total")
+
+
+def _launch_stats(launch: dict[str, Any]) -> dict[str, int]:
+    """Extract a launch's ``statistic`` block into a typed dict.
+
+    Allure's ``/launch`` response nests counts under ``launch.statistic.<key>``
+    and may omit missing keys. This helper coerces them to ``int`` with a
+    zero default.
+    """
+    stat = launch.get("statistic") or {}
+    return {k: int(stat.get(k, 0) or 0) for k in _STAT_KEYS}
+
+
+def _test_result_summary(r: dict[str, Any]) -> TestResultSummary:
+    """Shape a single ``/testresult`` item into :class:`TestResultSummary`.
+
+    Truncates ``statusMessage`` to 300 characters — agents typically need only
+    the first line or two of the trace to triage a failure; the rest blows
+    context.
+    """
+    return {
+        "id": int(r["id"]),
+        "name": r.get("name", ""),
+        "status": r.get("status", ""),
+        "duration_ms": int(r.get("duration", 0) or 0),
+        "error": (r.get("statusMessage", "") or "")[:300],
+    }
+
+
+async def _report(ctx: Context, progress: float, message: str) -> None:
+    """Emit a combined MCP progress + info event.
+
+    Agents get a progress fraction (0.0-1.0) for UI / timeout decisions plus
+    a human-readable message for logs. Pairing them avoids drift between the
+    progress bar and the narrative.
+    """
+    await ctx.report_progress(progress, message=message)
+    await ctx.info(message)
+
 
 # ── Projects ────────────────────────────────────────────────────────────────
 
@@ -48,6 +106,18 @@ def allure_list_projects(
 
     Use this first to discover which project IDs exist — all other tools
     take a ``project_id`` that you can look up here.
+
+    Returns:
+        dict with keys:
+            - ``count`` (int): number of projects in this response
+            - ``projects`` (list): each item has ``id``, ``name``, ``abbreviation``
+
+    Examples:
+        - "Which projects exist in Allure?" -> default call, take the names/ids
+        - "Find project by abbreviation" -> iterate ``projects`` and match
+
+        Don't use when:
+        - You already know the project id (skip discovery, go straight to the target tool).
     """
     try:
         client = get_client()
@@ -79,35 +149,82 @@ def allure_list_projects(
     },
     structured_output=True,
 )
-def allure_get_project_statistics(
-    project_id: Annotated[int, Field(ge=1, description="Allure project ID.")],
+async def allure_get_project_statistics(
+    project_id: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=2_147_483_647,
+            description="Allure project ID (discover via allure_list_projects).",
+        ),
+    ],
+    ctx: Context,
 ) -> ProjectStatistics:
     """Get summary statistics for an Allure project.
 
-    Returns TC count, automation rate, and the last closed launch's pass/fail
-    breakdown.
+    Returns TC count, automation rate, and the last closed launch's
+    pass/fail breakdown. Performs 3-4 API calls — progress is reported via
+    MCP Context (visible as progress updates in compatible clients).
+
+    Args:
+        project_id: Allure project ID (see ``allure_list_projects``).
+        ctx: MCP Context injected by FastMCP (used for progress reporting;
+            never supplied by the agent directly).
+
+    Returns:
+        dict with keys:
+            - ``project_id`` (int)
+            - ``total_test_cases`` (int)
+            - ``automated_test_cases`` (int)
+            - ``manual_test_cases`` (int)
+            - ``automation_rate_pct`` (float)
+            - ``last_launch_id`` (int | None): latest *closed* launch
+            - ``last_launch_name`` (str | None)
+            - ``last_launch_passed`` / ``last_launch_failed`` / ``last_launch_broken`` (int)
+            - ``last_launch_total`` (int)
+            - ``recent_launches_count`` (int): launches examined to find the latest closed one
+
+    Examples:
+        - "How automated is project 63?" -> ``project_id=63``, read ``automation_rate_pct``
+        - "What was the last passing run for project 175?" -> read ``last_launch_passed``
+
+        Don't use when:
+        - You need per-test detail (use ``allure_get_test_results``).
+        - You need the full launch history (use ``allure_list_launches``).
     """
     try:
         client = get_client()
-        total_tc = int(
-            client.get("/testcase", {"projectId": project_id, "page": 0, "size": 1}).get("totalElements", 0)
+
+        await _report(ctx, 0.1, "fetching total test case count")
+        total_data = await asyncio.to_thread(
+            client.get, "/testcase", {"projectId": project_id, "page": 0, "size": 1}
         )
-        auto_tc = int(
-            client.get(
-                "/testcase",
-                {"projectId": project_id, "page": 0, "size": 1, "automated": "true"},
-            ).get("totalElements", 0)
+        total_tc = int(total_data.get("totalElements", 0))
+
+        await _report(ctx, 0.3, "fetching automated test case count")
+        auto_data = await asyncio.to_thread(
+            client.get,
+            "/testcase",
+            {"projectId": project_id, "page": 0, "size": 1, "automated": "true"},
         )
-        launches = client.get(
+        auto_tc = int(auto_data.get("totalElements", 0))
+
+        await _report(ctx, 0.6, "fetching recent launches")
+        launches_data = await asyncio.to_thread(
+            client.get,
             "/launch",
             {"projectId": project_id, "page": 0, "size": 20, "sort": "createdDate,desc"},
-        ).get("content", [])
+        )
+        launches = launches_data.get("content", [])
         last = next((launch for launch in launches if launch.get("closed")), None)
 
         stat_map: dict[str, int] = {}
         if last:
-            stat_list = client.get(f"/launch/{last['id']}/statistic")
+            await _report(ctx, 0.85, f"fetching statistics for launch {last['id']}")
+            stat_list = await asyncio.to_thread(client.get, f"/launch/{last['id']}/statistic")
             stat_map = {s["status"]: int(s.get("count", 0)) for s in stat_list}
+
+        await _report(ctx, 1.0, "done")
 
         result: ProjectStatistics = {
             "project_id": project_id,
@@ -154,14 +271,38 @@ def allure_get_project_statistics(
     structured_output=True,
 )
 def allure_list_launches(
-    project_id: Annotated[int, Field(ge=1, description="Allure project ID.")],
-    page: Annotated[int, Field(default=0, ge=0, description="0-based page.")] = 0,
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+    page: Annotated[int, Field(default=0, ge=0, le=10_000, description="0-based page.")] = 0,
     size: Annotated[int, Field(default=20, ge=1, le=100, description="Items per page (1-100).")] = 20,
 ) -> LaunchesListOutput:
     """List recent launches for a project, newest first.
 
     Each launch carries a pass/fail/broken/skipped breakdown from Allure's
-    statistic field.
+    ``statistic`` field. Pagination info is returned in the ``pagination``
+    block (use ``next_page`` to continue).
+
+    Args:
+        project_id: Allure project ID.
+        page: 0-based page index.
+        size: Items per page (1-100; 20 is usually enough for triage).
+
+    Returns:
+        dict with keys:
+            - ``project_id`` (int)
+            - ``count`` (int): items in this response
+            - ``pagination`` (dict): ``page`` / ``size`` / ``total`` /
+              ``total_pages`` / ``has_more`` / ``next_page``
+            - ``launches`` (list): each with ``id`` / ``name`` / ``status`` /
+              ``created_date`` / ``passed`` / ``failed`` / ``broken`` /
+              ``skipped`` / ``total``
+
+    Examples:
+        - "Last 10 launches for project 63" -> ``project_id=63, size=10``
+        - "Older launches beyond page 1" -> repeat with ``page=1``
+
+        Don't use when:
+        - You need test results inside a launch (``allure_get_test_results``).
+        - You need just the latest FAILED/BROKEN tests (``allure_search_failed_tests``).
     """
     try:
         client = get_client()
@@ -180,11 +321,7 @@ def allure_list_launches(
                 "name": launch.get("name", ""),
                 "status": launch.get("status", ""),
                 "created_date": launch.get("createdDate"),
-                "passed": int(launch.get("statistic", {}).get("passed", 0)),
-                "failed": int(launch.get("statistic", {}).get("failed", 0)),
-                "broken": int(launch.get("statistic", {}).get("broken", 0)),
-                "skipped": int(launch.get("statistic", {}).get("skipped", 0)),
-                "total": int(launch.get("statistic", {}).get("total", 0)),
+                **_launch_stats(launch),  # type: ignore[typeddict-item]
             }
             for launch in data.get("content", [])
         ]
@@ -224,17 +361,36 @@ StatusFilter = Literal["PASSED", "FAILED", "BROKEN", "SKIPPED"]
     structured_output=True,
 )
 def allure_get_test_results(
-    launch_id: Annotated[int, Field(ge=1, description="Allure launch ID.")],
+    launch_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure launch ID.")],
     status: Annotated[
         StatusFilter | None,
         Field(default=None, description="Filter by status. None returns all statuses."),
     ] = None,
-    page: Annotated[int, Field(default=0, ge=0, description="0-based page.")] = 0,
+    page: Annotated[int, Field(default=0, ge=0, le=10_000, description="0-based page.")] = 0,
     size: Annotated[int, Field(default=50, ge=1, le=200, description="Items per page (1-200).")] = 50,
 ) -> TestResultsOutput:
     """Get individual test results inside a launch, optionally filtered by status.
 
-    Use ``allure_search_failed_tests`` for a quick view of only failures.
+    Args:
+        launch_id: Allure launch ID (from ``allure_list_launches``).
+        status: Filter — ``PASSED`` / ``FAILED`` / ``BROKEN`` / ``SKIPPED``. ``None`` returns all.
+        page: 0-based page index.
+        size: Items per page (1-200; default 50).
+
+    Returns:
+        dict with keys:
+            - ``launch_id`` (int)
+            - ``count`` (int)
+            - ``pagination`` (dict)
+            - ``results`` (list): each with ``id`` / ``name`` / ``status`` /
+              ``duration_ms`` / ``error`` (first 300 chars of ``statusMessage``)
+
+    Examples:
+        - "FAILED tests in launch 12345" -> ``launch_id=12345, status="FAILED"``
+        - "All results in launch X, second page" -> ``launch_id=X, page=1``
+
+        Don't use when:
+        - You want only FAILED+BROKEN (``allure_search_failed_tests`` does both in one call).
     """
     try:
         client = get_client()
@@ -242,16 +398,7 @@ def allure_get_test_results(
         if status:
             params["status"] = status
         data = client.get("/testresult", params)
-        results: list[TestResultSummary] = [
-            {
-                "id": int(r["id"]),
-                "name": r.get("name", ""),
-                "status": r.get("status", ""),
-                "duration_ms": int(r.get("duration", 0) or 0),
-                "error": (r.get("statusMessage", "") or "")[:300],
-            }
-            for r in data.get("content", [])
-        ]
+        results: list[TestResultSummary] = [_test_result_summary(r) for r in data.get("content", [])]
         result: TestResultsOutput = {
             "launch_id": launch_id,
             "count": len(results),
@@ -277,47 +424,77 @@ def allure_get_test_results(
     },
     structured_output=True,
 )
-def allure_search_failed_tests(
-    project_id: Annotated[int, Field(ge=1, description="Allure project ID.")],
+async def allure_search_failed_tests(
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+    ctx: Context,
     launch_id: Annotated[
         int | None,
-        Field(default=None, description="Specific launch ID. If omitted, uses the most recent launch."),
+        Field(
+            default=None,
+            ge=1,
+            le=2_147_483_647,
+            description="Specific launch ID. If omitted, uses the most recent launch.",
+        ),
     ] = None,
     limit: Annotated[int, Field(default=20, ge=1, le=200, description="Max failures to return per status.")] = 20,
 ) -> FailedTestsOutput:
     """Find FAILED and BROKEN tests in the most recent (or given) launch.
 
     Useful for triage: _"what's broken in the latest run"_ without listing
-    everything.
+    every test. Performs up to 3 API calls; progress reported via MCP Context.
+
+    Args:
+        project_id: Allure project ID.
+        launch_id: Specific launch ID. If ``None``, the latest launch is used.
+        limit: Max failures per status (so up to ``2 * limit`` total).
+        ctx: MCP Context (auto-injected).
+
+    Returns:
+        dict with keys:
+            - ``launch_id`` (int): the resolved launch (latest if not passed in)
+            - ``failed_count`` (int)
+            - ``results`` (list): ``id`` / ``name`` / ``status`` / ``duration_ms`` / ``error``
+
+    Examples:
+        - "What's failing in project 63 right now?" -> ``project_id=63``
+        - "Failures in launch 98765" -> ``project_id=N, launch_id=98765``
+
+        Don't use when:
+        - You need PASSED tests too (use ``allure_get_test_results`` without status filter).
     """
     try:
         client = get_client()
+
         if not launch_id:
-            content = client.get(
+            await _report(ctx, 0.1, "resolving latest launch")
+            latest_data = await asyncio.to_thread(
+                client.get,
                 "/launch",
                 {"projectId": project_id, "page": 0, "size": 1, "sort": "createdDate,desc"},
-            ).get("content", [])
+            )
+            content = latest_data.get("content", [])
             if not content:
-                result: FailedTestsOutput = {"launch_id": 0, "failed_count": 0, "results": []}
-                return output.ok(result, "(no launches found for project)")  # type: ignore[return-value]
+                empty: FailedTestsOutput = {
+                    "launch_id": 0,
+                    "failed_count": 0,
+                    "results": [],
+                    "reason": "no launches found for this project",
+                }
+                return output.ok(empty, "(no launches found for project)")  # type: ignore[return-value]
             launch_id = int(content[0]["id"])
 
         failed: list[TestResultSummary] = []
-        for status in ("FAILED", "BROKEN"):
-            items = client.get(
+        for i, status in enumerate(("FAILED", "BROKEN")):
+            await _report(ctx, 0.3 + 0.3 * i, f"fetching {status} results")
+            items_data = await asyncio.to_thread(
+                client.get,
                 "/testresult",
                 {"launchId": launch_id, "status": status, "page": 0, "size": limit},
-            ).get("content", [])
-            for r in items:
-                failed.append(
-                    {
-                        "id": int(r["id"]),
-                        "name": r.get("name", ""),
-                        "status": r.get("status", ""),
-                        "duration_ms": int(r.get("duration", 0) or 0),
-                        "error": (r.get("statusMessage", "") or "")[:300],
-                    }
-                )
+            )
+            items = items_data.get("content", [])
+            failed.extend(_test_result_summary(r) for r in items)
+
+        await _report(ctx, 1.0, "done")
 
         result: FailedTestsOutput = {
             "launch_id": int(launch_id),
@@ -346,26 +523,49 @@ def allure_search_failed_tests(
     },
     structured_output=True,
 )
-def allure_list_test_cases(
-    project_id: Annotated[int, Field(ge=1, description="Allure project ID.")],
+async def allure_list_test_cases(
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+    ctx: Context,
     automated: Annotated[
         bool | None,
         Field(default=None, description="True: only automated. False: only manual. None: both."),
     ] = None,
-    page: Annotated[int, Field(default=0, ge=0, description="0-based page.")] = 0,
+    page: Annotated[int, Field(default=0, ge=0, le=10_000, description="0-based page.")] = 0,
     size: Annotated[int, Field(default=50, ge=1, le=200, description="Items per page (1-200).")] = 50,
 ) -> TestCasesListOutput:
     """List test cases for a project with optional manual/automated filter.
 
-    Each TC returns id, name, automation flag, status and layer (e.g. ``UNIT``,
-    ``API``, ``E2E``).
+    Each TC returns id, name, automation flag, status and layer (e.g.
+    ``UNIT``, ``API``, ``E2E``).
+
+    Args:
+        project_id: Allure project ID.
+        ctx: MCP Context (auto-injected by FastMCP for progress reporting).
+        automated: ``True`` — only automated, ``False`` — only manual, ``None`` — both.
+        page: 0-based page index.
+        size: Items per page (1-200; default 50).
+
+    Returns:
+        dict with keys:
+            - ``project_id`` (int)
+            - ``count`` (int)
+            - ``pagination`` (dict)
+            - ``test_cases`` (list): ``id`` / ``name`` / ``automated`` / ``status`` / ``layer``
+
+    Examples:
+        - "How many manual TCs does project 63 have?" -> ``project_id=63, automated=False``, read ``pagination.total``
+        - "First 200 automated TCs" -> ``automated=True, size=200``
+
+        Don't use when:
+        - You need just the automation % (``allure_get_project_statistics``).
     """
     try:
         client = get_client()
+        await _report(ctx, 0.1, f"listing test cases for project {project_id}")
         params: dict[str, object] = {"projectId": project_id, "page": page, "size": size}
         if automated is not None:
             params["automated"] = "true" if automated else "false"
-        data = client.get("/testcase", params)
+        data = await asyncio.to_thread(client.get, "/testcase", params)
         test_cases: list[TestCaseSummary] = [
             {
                 "id": int(tc["id"]),
@@ -376,6 +576,7 @@ def allure_list_test_cases(
             }
             for tc in data.get("content", [])
         ]
+        await _report(ctx, 1.0, f"{len(test_cases)} test cases fetched")
         result: TestCasesListOutput = {
             "project_id": project_id,
             "count": len(test_cases),

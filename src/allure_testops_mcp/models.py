@@ -1,8 +1,30 @@
-"""TypedDict output schemas for every MCP tool."""
+"""TypedDict output schemas for every MCP tool.
+
+These schemas are read by FastMCP (``structured_output=True``) to generate
+a JSON-Schema ``outputSchema`` for each tool. Clients that support
+structured data use that schema to validate the ``structuredContent``
+payload; clients that don't use the markdown ``content`` block instead.
+
+Precision matters: fields required on every response use :class:`Required`,
+fields that appear only in certain branches (e.g. "no launches found") use
+:class:`NotRequired`.
+"""
 
 from __future__ import annotations
 
-from typing_extensions import TypedDict
+import sys
+
+if sys.version_info >= (3, 11):
+    from typing import NotRequired, Required, TypedDict
+else:
+    # Required / NotRequired (PEP 655) were added to stdlib ``typing`` in
+    # Python 3.11. Crucially, the stdlib ``typing.TypedDict`` on 3.10 does
+    # NOT recognise ``Required`` / ``NotRequired`` annotations — so we import
+    # ``TypedDict`` itself from ``typing_extensions`` on 3.10 to get the
+    # fully PEP 655-aware backport (``__required_keys__`` / ``__optional_keys__``
+    # populated correctly). ``typing-extensions>=4.5`` is a conditional dep
+    # declared in pyproject.toml.
+    from typing_extensions import NotRequired, Required, TypedDict
 
 
 class PaginationMeta(TypedDict, total=False):
@@ -11,6 +33,7 @@ class PaginationMeta(TypedDict, total=False):
     total: int | None
     total_pages: int | None
     has_more: bool
+    next_page: int | None
 
 
 # ── Projects ────────────────────────────────────────────────────────────────
@@ -27,7 +50,13 @@ class ProjectsListOutput(TypedDict):
     projects: list[ProjectSummary]
 
 
-class ProjectStatistics(TypedDict, total=False):
+class ProjectStatistics(TypedDict):
+    """Aggregate statistics for a project.
+
+    ``last_launch_*`` fields are ``None`` when the project has no closed
+    launches (required key, nullable value — different from "absent key").
+    """
+
     project_id: int
     total_test_cases: int
     automated_test_cases: int
@@ -83,9 +112,16 @@ class TestResultsOutput(TypedDict):
 
 
 class FailedTestsOutput(TypedDict):
-    launch_id: int
-    failed_count: int
-    results: list[TestResultSummary]
+    """Output for :func:`allure_search_failed_tests`.
+
+    ``launch_id`` is ``0`` when no launches exist for the project and the
+    tool short-circuits to an empty result.
+    """
+
+    launch_id: Required[int]
+    failed_count: Required[int]
+    results: Required[list[TestResultSummary]]
+    reason: NotRequired[str]
 
 
 # ── Test cases ──────────────────────────────────────────────────────────────

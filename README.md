@@ -5,6 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/allure-testops-mcp.svg?logo=pypi&logoColor=white)](https://pypi.org/project/allure-testops-mcp/)
 [![Python](https://img.shields.io/pypi/pyversions/allure-testops-mcp.svg?logo=python&logoColor=white)](https://pypi.org/project/allure-testops-mcp/)
 [![License: MIT](https://img.shields.io/pypi/l/allure-testops-mcp.svg)](LICENSE)
+[![Tests](https://github.com/mshegolev/allure-testops-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/mshegolev/allure-testops-mcp/actions/workflows/test.yml)
 
 MCP server for [Allure TestOps](https://qameta.io/). Lets an LLM agent (Claude Code, Cursor, OpenCode, etc.) query projects, launches, test cases and test results through the Allure REST API.
 
@@ -19,6 +20,7 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 - **Structured errors** — auth, 404, 403, 429, 5xx, missing-env errors converted to actionable messages (e.g. _"Authentication failed — verify ALLURE_TOKEN has API scope"_).
 - **Pydantic input validation** — every argument has typed constraints (ranges, lengths, literals) auto-exposed as JSON Schema.
 - **Pagination** — list tools return a `pagination` block with `page`, `total`, `has_more`, `next_page`.
+- **Progress reporting via MCP Context** — tools that make multiple API calls (`allure_get_project_statistics`, `allure_search_failed_tests`) and `allure_list_test_cases` emit `ctx.report_progress` + `ctx.info` events so compatible clients can render progress bars and step labels.
 
 ## Features
 
@@ -34,7 +36,7 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 - `allure_search_failed_tests` — FAILED/BROKEN tests in last or specified launch
 
 **Test cases**
-- `allure_list_test_cases` — test cases with manual/auto/layer filters
+- `allure_list_test_cases` — test cases with automated/manual filter (each result also carries its layer, e.g. `UNIT` / `API` / `E2E`)
 
 ## Installation
 
@@ -79,6 +81,8 @@ Or in `~/.claude.json` / project `.mcp.json`:
 }
 ```
 
+See [`.env.example`](./.env.example) for a template of all supported environment variables.
+
 Check:
 
 ```bash
@@ -103,6 +107,30 @@ In Claude Code:
 - "Failed tests in the last launch for project 175"
 - "Automation rate for project 842"
 - "Test results in launch 12345 with status FAILED"
+
+## Security considerations
+
+- **API token is read from `ALLURE_TOKEN` env var** — never passed on the command line and never written to logs.
+- **Secrets are not echoed back** in tool responses (no `stat.request_headers` dumps, no `session.auth` reflection).
+- **Self-signed SSL** is opt-in via `ALLURE_SSL_VERIFY=false` — the default is `true`. Disabling verification on a public network is a security risk; only use for trusted corporate instances.
+- **Proxy discovery is disabled** (`session.trust_env = False`) — the MCP deliberately ignores `HTTP_PROXY`/`HTTPS_PROXY` env vars so the session cannot be silently routed through an unintended proxy. If your Allure instance is reachable only via proxy, run the MCP in an environment where `requests` can resolve directly.
+- **No write operations exposed** — all 6 tools are read-only. Even if the API token has write scope, this MCP server cannot create, modify, or delete anything in Allure TestOps.
+- **Input validation via Pydantic** — every tool argument is typed and bounded (IDs must be ≥ 1, pagination capped at 200-500).
+
+## Rate limits
+
+Allure TestOps enforces per-instance rate limits (typically ~60 requests / minute for API tokens). On HTTP 429 the MCP returns an actionable error suggesting you:
+
+- Wait 30-60 seconds before retrying.
+- Reduce the `size` parameter (default 50 for test results, 200 for projects).
+- Paginate with smaller page sizes.
+
+Two tools perform multiple API calls internally:
+
+- `allure_get_project_statistics` — 3 calls (TC counts + launches + launch statistic).
+- `allure_search_failed_tests` — 2-3 calls (latest launch resolve + FAILED + BROKEN).
+
+Both use MCP `Context` to report per-step progress; `allure_list_test_cases` also emits a single progress event. Monitor the progress stream in compatible clients.
 
 ## Development
 

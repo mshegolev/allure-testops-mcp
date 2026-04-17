@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, NoReturn
 
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
@@ -19,6 +19,11 @@ def ok(data: Mapping[str, Any], markdown: str) -> CallToolResult:
     )
 
 
-def fail(exc: Exception, action: str) -> None:
-    """Raise a ``ToolError`` carrying the actionable error message."""
+def fail(exc: Exception, action: str) -> NoReturn:
+    """Raise a ``ToolError`` carrying the actionable error message.
+
+    The ``NoReturn`` annotation lets type-checkers understand that control
+    flow does not return from this function — callers can write ``return``
+    or trailing code after a ``fail()`` call without mypy warnings.
+    """
     raise ToolError(errors.handle(exc, action)) from exc
