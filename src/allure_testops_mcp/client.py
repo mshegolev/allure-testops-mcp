@@ -41,7 +41,7 @@ def _parse_bool(value: str | bool | None, *, default: bool) -> bool:
 
 def _validate_url(url: str) -> str:
     """Validate that ``url`` is a well-formed HTTP/HTTPS URL and return it
-    stripped of any trailing slash.
+    with leading/trailing whitespace and any trailing slash stripped.
 
     Raises :class:`ConfigError` if the URL is missing scheme/netloc or uses
     an unsupported scheme.
@@ -49,12 +49,13 @@ def _validate_url(url: str) -> str:
     if not url:
         raise ConfigError("ALLURE_URL is not set — configure the env var")
 
-    parsed = urlparse(url.strip())
+    cleaned = url.strip()
+    parsed = urlparse(cleaned)
     if parsed.scheme not in ("http", "https"):
         raise ConfigError(f"ALLURE_URL must start with http:// or https:// (got: {url!r})")
     if not parsed.netloc:
         raise ConfigError(f"ALLURE_URL is missing host (got: {url!r})")
-    return url.rstrip("/")
+    return cleaned.rstrip("/")
 
 
 class AllureClient:
