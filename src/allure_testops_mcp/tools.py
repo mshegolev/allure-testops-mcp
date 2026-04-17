@@ -30,15 +30,14 @@ from allure_testops_mcp.models import (
     FailedTestsOutput,
     LaunchesListOutput,
     LaunchSummary,
-    ProjectStatistics,
     ProjectsListOutput,
+    ProjectStatistics,
     ProjectSummary,
-    TestCaseSummary,
     TestCasesListOutput,
-    TestResultSummary,
+    TestCaseSummary,
     TestResultsOutput,
+    TestResultSummary,
 )
-
 
 # ── Small response-shaping helpers (DRY) ────────────────────────────────────
 
