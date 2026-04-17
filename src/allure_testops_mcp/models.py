@@ -14,16 +14,20 @@ from __future__ import annotations
 
 import sys
 
-if sys.version_info >= (3, 11):
+if sys.version_info >= (3, 12):
     from typing import NotRequired, Required, TypedDict
 else:
-    # Required / NotRequired (PEP 655) were added to stdlib ``typing`` in
-    # Python 3.11. Crucially, the stdlib ``typing.TypedDict`` on 3.10 does
-    # NOT recognise ``Required`` / ``NotRequired`` annotations — so we import
-    # ``TypedDict`` itself from ``typing_extensions`` on 3.10 to get the
-    # fully PEP 655-aware backport (``__required_keys__`` / ``__optional_keys__``
-    # populated correctly). ``typing-extensions>=4.5`` is a conditional dep
-    # declared in pyproject.toml.
+    # Pydantic 2.13+ rejects stdlib ``typing.TypedDict`` on Python < 3.12
+    # (it mandates ``typing_extensions.TypedDict`` for runtime schema
+    # introspection — see https://errors.pydantic.dev/2.13/u/typed-dict-version).
+    #
+    # Additionally, on Python 3.10 the stdlib ``typing.TypedDict`` does not
+    # recognise ``Required`` / ``NotRequired`` annotations at all (PEP 655
+    # landed in stdlib only with 3.11). Using ``typing_extensions.TypedDict``
+    # + its own Required/NotRequired solves both problems with one import.
+    #
+    # ``typing-extensions>=4.5`` is a conditional dep declared in pyproject.toml
+    # (applied on ``python_version < '3.12'``).
     from typing_extensions import NotRequired, Required, TypedDict
 
 
