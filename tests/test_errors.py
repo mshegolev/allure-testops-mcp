@@ -10,7 +10,6 @@ from __future__ import annotations
 import pytest
 import requests
 import responses
-
 from allure_testops_mcp.errors import ConfigError, handle
 
 

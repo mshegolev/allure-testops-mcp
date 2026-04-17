@@ -9,14 +9,11 @@ from __future__ import annotations
 
 from allure_testops_mcp.tools import _launch_stats, _test_result_summary
 
-
 # ── _launch_stats ───────────────────────────────────────────────────────────
 
 
 def test_launch_stats_full_breakdown():
-    launch = {
-        "statistic": {"passed": 10, "failed": 2, "broken": 1, "skipped": 3, "total": 16}
-    }
+    launch = {"statistic": {"passed": 10, "failed": 2, "broken": 1, "skipped": 3, "total": 16}}
     assert _launch_stats(launch) == {
         "passed": 10,
         "failed": 2,

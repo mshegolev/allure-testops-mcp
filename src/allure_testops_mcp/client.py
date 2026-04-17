@@ -51,9 +51,7 @@ def _validate_url(url: str) -> str:
 
     parsed = urlparse(url.strip())
     if parsed.scheme not in ("http", "https"):
-        raise ConfigError(
-            f"ALLURE_URL must start with http:// or https:// (got: {url!r})"
-        )
+        raise ConfigError(f"ALLURE_URL must start with http:// or https:// (got: {url!r})")
     if not parsed.netloc:
         raise ConfigError(f"ALLURE_URL is missing host (got: {url!r})")
     return url.rstrip("/")

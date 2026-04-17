@@ -196,9 +196,7 @@ async def allure_get_project_statistics(
         client = get_client()
 
         await _report(ctx, 0.1, "fetching total test case count")
-        total_data = await asyncio.to_thread(
-            client.get, "/testcase", {"projectId": project_id, "page": 0, "size": 1}
-        )
+        total_data = await asyncio.to_thread(client.get, "/testcase", {"projectId": project_id, "page": 0, "size": 1})
         total_tc = int(total_data.get("totalElements", 0))
 
         await _report(ctx, 0.3, "fetching automated test case count")

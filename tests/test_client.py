@@ -7,10 +7,8 @@ env-var parsing, and bool coercion.
 from __future__ import annotations
 
 import pytest
-
 from allure_testops_mcp.client import _parse_bool, _validate_url
 from allure_testops_mcp.errors import ConfigError
-
 
 # ── _parse_bool ─────────────────────────────────────────────────────────────
 
