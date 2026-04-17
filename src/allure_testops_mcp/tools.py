@@ -497,6 +497,7 @@ async def allure_search_failed_tests(
             "launch_id": int(launch_id),
             "failed_count": len(failed),
             "results": failed[:limit],
+            "reason": None,
         }
         md = f"## Failed tests in launch {launch_id} ({len(failed)} total)\n\n" + "\n".join(
             [f"- **{r['status']}** {r['name']} — {r['error'][:120]}" for r in failed[:limit]]

@@ -43,7 +43,8 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 - README Design highlights now lists progress reporting via MCP Context explicitly.
 - README Rate limits section clarified: all 3 ctx-using tools emit progress events (previously "Both" was ambiguous).
 - New `tests/test_tools_helpers.py` with unit tests for `_launch_stats` and `_test_result_summary` helpers.
-- `typing-extensions` dep condition bumped to `python_version < '3.12'` (Pydantic 2.13+ requires `typing_extensions.TypedDict` on Py < 3.12, not just < 3.11). Matching guard in `models.py`.
+- `typing-extensions` dep condition bumped to `python_version < '3.12'` (Pydantic 2.13+ requires `typing_extensions.TypedDict` on Py < 3.12). Matching guard in `models.py`.
+- Dropped `Required`/`NotRequired` qualifiers — Pydantic 2.13 rejects them during runtime schema generation (`PydanticForbiddenQualifier`). Optional fields now use `str | None` convention with explicit `None` in happy-path.
 - `_validate_url` now returns the whitespace-stripped URL (matches documented behaviour).
 
 ## [0.1.0] — 2026-04-18

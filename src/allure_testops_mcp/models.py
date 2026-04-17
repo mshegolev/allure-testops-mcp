@@ -5,30 +5,24 @@ a JSON-Schema ``outputSchema`` for each tool. Clients that support
 structured data use that schema to validate the ``structuredContent``
 payload; clients that don't use the markdown ``content`` block instead.
 
-Precision matters: fields required on every response use :class:`Required`,
-fields that appear only in certain branches (e.g. "no launches found") use
-:class:`NotRequired`.
+**Note on Python / Pydantic compat.** We deliberately avoid ``Required`` /
+``NotRequired`` qualifiers: Pydantic 2.13+ mishandles them on Py < 3.12 (see
+https://errors.pydantic.dev/2.13/u/typed-dict-version and PydanticForbiddenQualifier).
+Instead, every field is required at the type level; optional branches use
+``| None`` and the code always sets the key (with ``None`` when absent).
 """
 
 from __future__ import annotations
 
 import sys
 
+# Pydantic 2.13+ rejects stdlib ``typing.TypedDict`` on Python < 3.12 during
+# runtime schema generation. On 3.12+ the stdlib class is fine. See the
+# module docstring above for the full reasoning.
 if sys.version_info >= (3, 12):
-    from typing import NotRequired, Required, TypedDict
+    from typing import TypedDict
 else:
-    # Pydantic 2.13+ rejects stdlib ``typing.TypedDict`` on Python < 3.12
-    # (it mandates ``typing_extensions.TypedDict`` for runtime schema
-    # introspection — see https://errors.pydantic.dev/2.13/u/typed-dict-version).
-    #
-    # Additionally, on Python 3.10 the stdlib ``typing.TypedDict`` does not
-    # recognise ``Required`` / ``NotRequired`` annotations at all (PEP 655
-    # landed in stdlib only with 3.11). Using ``typing_extensions.TypedDict``
-    # + its own Required/NotRequired solves both problems with one import.
-    #
-    # ``typing-extensions>=4.5`` is a conditional dep declared in pyproject.toml
-    # (applied on ``python_version < '3.12'``).
-    from typing_extensions import NotRequired, Required, TypedDict
+    from typing_extensions import TypedDict
 
 
 class PaginationMeta(TypedDict, total=False):
@@ -118,14 +112,15 @@ class TestResultsOutput(TypedDict):
 class FailedTestsOutput(TypedDict):
     """Output for :func:`allure_search_failed_tests`.
 
-    ``launch_id`` is ``0`` when no launches exist for the project and the
-    tool short-circuits to an empty result.
+    ``launch_id`` is ``0`` when no launches exist for the project; in that
+    short-circuit path ``reason`` carries a human-readable explanation.
+    In the normal path ``reason`` is ``None``.
     """
 
-    launch_id: Required[int]
-    failed_count: Required[int]
-    results: Required[list[TestResultSummary]]
-    reason: NotRequired[str]
+    launch_id: int
+    failed_count: int
+    results: list[TestResultSummary]
+    reason: str | None
 
 
 # ── Test cases ──────────────────────────────────────────────────────────────
