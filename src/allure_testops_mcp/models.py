@@ -132,6 +132,9 @@ class TestCaseSummary(TypedDict):
     automated: bool
     status: str
     layer: str
+    created_by: str
+    last_modified_by: str
+    tags: list[str]
 
 
 class TestCasesListOutput(TypedDict):

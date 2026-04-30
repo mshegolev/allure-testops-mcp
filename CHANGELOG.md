@@ -3,6 +3,44 @@
 All notable changes to `allure-testops-mcp` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use [SemVer](https://semver.org/).
 
+## [0.2.1] — 2026-04-30
+
+Internal cleanup pass; no behavioural or public-API changes.
+
+### Changed
+- DRY'd the `owner` username alphabet — `_USERNAME_PATTERN` is now a single source of truth, threaded through both the Pydantic `Field(pattern=...)` on `allure_list_test_cases` and the existing `_build_owner_rql` regex check. Invalid usernames now fail at the MCP-call boundary with a Pydantic validation error instead of bubbling up as `ValueError` from the helper. The helper still re-validates for defence in depth and to keep its unit tests independent of FastMCP wiring.
+- Replaced `is automated` with `== automated` in the post-page automation filter (PEP-8: reserve `is` for sentinels, not value comparison).
+- Rewrote the test-cases markdown rendering as a small parts-list / for-loop instead of nested f-string + conditional concatenation — same output, easier to extend.
+
+### Removed
+- `test_build_owner_rql_basic` (functionally subsumed by `test_build_owner_rql_accepts_allure_usernames`, which now asserts the exact RQL shape on each parametrised username).
+- Dropped a leftover `""` fallback in the `tags` list comprehension (the `if t.get("name")` guard already filters out anonymous entries, so the default was unreachable).
+
+## [0.2.0] — 2026-04-30
+
+### Added
+- `allure_list_test_cases` now exposes the audit-trail usernames and tags of every test case. `TestCaseSummary` gained three fields: `created_by` (str), `last_modified_by` (str) and `tags` (list[str]).
+- New optional `owner: str | None = None` parameter on `allure_list_test_cases`. When set, the result is narrowed to TCs the user authored or last modified — server-side, via Allure's RQL `__search` endpoint with `createdBy = "<owner>" or lastModifiedBy = "<owner>"`. Pagination stays consistent (no client-side post-filter on the owner axis). Username is validated against `^[A-Za-z0-9._@-]+$` to prevent RQL injection through the URL — invalid input raises `ValueError`.
+- New `_build_owner_rql` helper in `tools.py`, unit-tested for the happy path (jdoe, j.doe, jdoe-bot, j_doe, jdoe@corp) and against 7 injection-style inputs (embedded quotes, RQL keywords, backslash, empty, trailing space).
+
+### Changed
+- `allure_list_test_cases` now selects the upstream endpoint based on the filters in play:
+  - Without `owner`: keeps using `GET /testcase` for compatibility — compact projection (audit fields and tags are absent and surface as `""` / `[]`), native server-side `automated` filter.
+  - With `owner`: uses `GET /testcase/__search?rql=...` — full projection (audit fields and tags are populated). Allure's `__search` does not accept `automated` as a query parameter, so when both `owner` and `automated` are set the `automated` filter is applied client-side after the page is fetched; this is documented in the tool docstring.
+- The `owner` semantics intentionally mean "creator OR last modifier", not "assignee". Allure TestOps does not expose a separate `owner` field in RQL on most deployments — the `createdBy`/`lastModifiedBy` union is the closest stable proxy for "TCs I touched".
+
+### Fixed
+- `_test_case_summary` no longer emits `None` for missing audit fields (Pydantic rejects `None` for `str` fields) and tolerates malformed `tags` entries (anonymous tags, non-dict items) by skipping them rather than raising.
+
+## [0.1.3] — 2026-04-30
+
+### Fixed
+- `allure_list_test_cases` no longer fails Pydantic validation on every project. Allure TestOps returns the test-case `status` field as a `{id, name}` object (or `null`), but the mapping passed the raw dict straight into `TestCaseSummary.status: str`, raising `5 validation errors for TestCasesListOutput / test_cases.0.status / Input should be a valid string`. Mapping now unwraps `status` the same way `layer` was already handled — `(tc.get("status") or {}).get("name", "")` — handling both the object and the `null` case.
+
+### Added
+- New `_test_case_summary` helper in `tools.py` (mirrors `_test_result_summary`): single source of truth for shaping `/testcase` items, easier to unit-test in isolation.
+- Regression tests in `tests/test_tools_helpers.py` covering `status` as object / `null` / missing, `status` object without `name`, and a Pydantic `TypeAdapter` round-trip on `TestCaseSummary` to lock in the exact failure mode the bug report described (`status: {id: -1, name: "Draft", ...}`).
+
 ## [0.1.2] — 2026-04-18
 
 Same audit-hardening changes originally targeted at 0.1.1, re-tagged because
