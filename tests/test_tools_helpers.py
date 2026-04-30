@@ -244,17 +244,13 @@ def test_test_case_summary_passes_pydantic_validation():
 # regression coverage against accidental query-injection.
 
 
-def test_build_owner_rql_basic():
-    assert _build_owner_rql("jdoe") == 'createdBy = "jdoe" or lastModifiedBy = "jdoe"'
-
-
 @pytest.mark.parametrize("username", ["jdoe", "j.doe", "jdoe-bot", "j_doe", "jdoe@corp", "User123"])
 def test_build_owner_rql_accepts_allure_usernames(username):
     """Allure usernames may contain letters, digits, dot, dash, underscore
-    and ``@`` (some deployments use email-style logins)."""
-    rql = _build_owner_rql(username)
-    assert username in rql
-    assert "createdBy" in rql and "lastModifiedBy" in rql
+    and ``@`` (some deployments use email-style logins). The exact RQL
+    shape is asserted so we'd notice a silent quoting / operator change."""
+    expected = f'createdBy = "{username}" or lastModifiedBy = "{username}"'
+    assert _build_owner_rql(username) == expected
 
 
 @pytest.mark.parametrize(

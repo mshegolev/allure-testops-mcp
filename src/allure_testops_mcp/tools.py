@@ -97,15 +97,20 @@ def _test_case_summary(tc: dict[str, Any]) -> TestCaseSummary:
         "layer": (tc.get("layer") or {}).get("name", ""),
         "created_by": tc.get("createdBy") or "",
         "last_modified_by": tc.get("lastModifiedBy") or "",
-        "tags": [t.get("name", "") for t in (tc.get("tags") or []) if isinstance(t, dict) and t.get("name")],
+        "tags": [t["name"] for t in (tc.get("tags") or []) if isinstance(t, dict) and t.get("name")],
     }
 
 
-# Allure usernames are alphanumeric plus a small punctuation set (``.``,
-# ``_``, ``-``, ``@``). Restricting input to that alphabet kills RQL
-# injection at the boundary — no need to escape inside the query string,
-# which Allure's RQL parser handles inconsistently across versions.
-_RQL_USERNAME_RE = re.compile(r"^[A-Za-z0-9._@-]+$")
+# Allure usernames are alphanumeric plus a small punctuation set. Restricting
+# input to that alphabet kills RQL injection at the boundary — no need to
+# escape inside the query string, which Allure's RQL parser handles
+# inconsistently across versions. The pattern is duplicated into the
+# ``owner`` Pydantic ``Field`` below so invalid input is rejected at the
+# MCP-call boundary; ``_build_owner_rql`` re-checks for defence in depth
+# (and so the helper stays directly testable in isolation).
+_USERNAME_PATTERN = r"^[A-Za-z0-9._@-]+$"
+_USERNAME_ALPHABET_DESC = "letters, digits, '.', '_', '-', '@'"
+_RQL_USERNAME_RE = re.compile(_USERNAME_PATTERN)
 
 
 def _build_owner_rql(owner: str) -> str:
@@ -124,7 +129,7 @@ def _build_owner_rql(owner: str) -> str:
             input is interpolated into a query string).
     """
     if not _RQL_USERNAME_RE.fullmatch(owner):
-        raise ValueError(f"owner must be a plain Allure username (letters, digits, '.', '_', '-', '@'); got {owner!r}")
+        raise ValueError(f"owner must be a plain Allure username ({_USERNAME_ALPHABET_DESC}); got {owner!r}")
     return f'createdBy = "{owner}" or lastModifiedBy = "{owner}"'
 
 
@@ -589,6 +594,7 @@ async def allure_list_test_cases(
         Field(
             default=None,
             max_length=255,
+            pattern=_USERNAME_PATTERN,
             description=(
                 "Allure username — narrows the result to TCs where the user is the creator "
                 "OR the last modifier. Applied server-side via Allure RQL (see docstring)."
@@ -616,9 +622,9 @@ async def allure_list_test_cases(
         owner: Optional Allure username. When set, the response is narrowed
             to TCs where ``createdBy = owner OR lastModifiedBy = owner``
             (case-sensitive, exact match), enforced **server-side** via
-            Allure's RQL ``__search`` endpoint. The username must contain
-            only letters, digits or ``.`` ``_`` ``-`` ``@`` — anything
-            else is rejected with ``ValueError`` to prevent RQL injection.
+            Allure's RQL ``__search`` endpoint. The username must match
+            ``[A-Za-z0-9._@-]+`` — anything else is rejected at the MCP
+            input layer (Pydantic ``pattern``) to prevent RQL injection.
 
             **Why "creator/modifier" and not "owner".** Allure TestOps does
             not expose a separate ``owner`` field in RQL on most
@@ -668,7 +674,7 @@ async def allure_list_test_cases(
             data = await asyncio.to_thread(client.get, "/testcase/__search", params)
             raw = data.get("content", [])
             if automated is not None:
-                raw = [tc for tc in raw if bool(tc.get("automated", False)) is automated]
+                raw = [tc for tc in raw if bool(tc.get("automated", False)) == automated]
         else:
             # Plain /testcase path: native automated filter, compact projection.
             params = {"projectId": project_id, "page": page, "size": size}
@@ -689,16 +695,15 @@ async def allure_list_test_cases(
         if owner:
             header += f", touched by '{owner}'"
         header += ")\n\n"
-        md = header + "\n".join(
-            [
-                f"- **#{tc['id']}** {tc['name']} "
-                f"({'auto' if tc['automated'] else 'manual'}, {tc['layer'] or 'no-layer'}"
-                + (f", by {tc['created_by']}" if tc["created_by"] else "")
-                + (f", tags: {', '.join(tc['tags'])}" if tc["tags"] else "")
-                + ")"
-                for tc in test_cases
-            ]
-        )
+        md_lines: list[str] = []
+        for tc in test_cases:
+            parts = ["auto" if tc["automated"] else "manual", tc["layer"] or "no-layer"]
+            if tc["created_by"]:
+                parts.append(f"by {tc['created_by']}")
+            if tc["tags"]:
+                parts.append(f"tags: {', '.join(tc['tags'])}")
+            md_lines.append(f"- **#{tc['id']}** {tc['name']} ({', '.join(parts)})")
+        md = header + "\n".join(md_lines)
         return output.ok(result, md)  # type: ignore[return-value]
     except Exception as exc:
         output.fail(exc, f"listing test cases for project {project_id}")
