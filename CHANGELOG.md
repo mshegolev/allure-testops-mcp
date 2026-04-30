@@ -3,6 +3,15 @@
 All notable changes to `allure-testops-mcp` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use [SemVer](https://semver.org/).
 
+## [0.1.3] — 2026-04-30
+
+### Fixed
+- `allure_list_test_cases` no longer fails Pydantic validation on every project. Allure TestOps returns the test-case `status` field as a `{id, name}` object (or `null`), but the mapping passed the raw dict straight into `TestCaseSummary.status: str`, raising `5 validation errors for TestCasesListOutput / test_cases.0.status / Input should be a valid string`. Mapping now unwraps `status` the same way `layer` was already handled — `(tc.get("status") or {}).get("name", "")` — handling both the object and the `null` case.
+
+### Added
+- New `_test_case_summary` helper in `tools.py` (mirrors `_test_result_summary`): single source of truth for shaping `/testcase` items, easier to unit-test in isolation.
+- Regression tests in `tests/test_tools_helpers.py` covering `status` as object / `null` / missing, `status` object without `name`, and a Pydantic `TypeAdapter` round-trip on `TestCaseSummary` to lock in the exact failure mode the bug report described (`status: {id: -1, name: "Draft", ...}`).
+
 ## [0.1.2] — 2026-04-18
 
 Same audit-hardening changes originally targeted at 0.1.1, re-tagged because

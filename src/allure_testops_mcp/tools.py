@@ -72,6 +72,22 @@ def _test_result_summary(r: dict[str, Any]) -> TestResultSummary:
     }
 
 
+def _test_case_summary(tc: dict[str, Any]) -> TestCaseSummary:
+    """Shape a single ``/testcase`` item into :class:`TestCaseSummary`.
+
+    Allure TestOps returns ref-like fields (``status``, ``layer``) as either
+    a ``{"id": ..., "name": "..."}`` object or ``null`` — never a primitive
+    string. We unwrap to ``name`` so the output schema sees a plain ``str``.
+    """
+    return {
+        "id": int(tc["id"]),
+        "name": tc.get("name", ""),
+        "automated": bool(tc.get("automated", False)),
+        "status": (tc.get("status") or {}).get("name", ""),
+        "layer": (tc.get("layer") or {}).get("name", ""),
+    }
+
+
 async def _report(ctx: Context, progress: float, message: str) -> None:
     """Emit a combined MCP progress + info event.
 
@@ -564,16 +580,7 @@ async def allure_list_test_cases(
         if automated is not None:
             params["automated"] = "true" if automated else "false"
         data = await asyncio.to_thread(client.get, "/testcase", params)
-        test_cases: list[TestCaseSummary] = [
-            {
-                "id": int(tc["id"]),
-                "name": tc.get("name", ""),
-                "automated": bool(tc.get("automated", False)),
-                "status": tc.get("status", ""),
-                "layer": (tc.get("layer") or {}).get("name", ""),
-            }
-            for tc in data.get("content", [])
-        ]
+        test_cases: list[TestCaseSummary] = [_test_case_summary(tc) for tc in data.get("content", [])]
         await _report(ctx, 1.0, f"{len(test_cases)} test cases fetched")
         result: TestCasesListOutput = {
             "project_id": project_id,
