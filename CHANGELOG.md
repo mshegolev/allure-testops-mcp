@@ -3,6 +3,22 @@
 All notable changes to `allure-testops-mcp` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use [SemVer](https://semver.org/).
 
+## [0.2.0] — 2026-04-30
+
+### Added
+- `allure_list_test_cases` now exposes the audit-trail usernames and tags of every test case. `TestCaseSummary` gained three fields: `created_by` (str), `last_modified_by` (str) and `tags` (list[str]).
+- New optional `owner: str | None = None` parameter on `allure_list_test_cases`. When set, the result is narrowed to TCs the user authored or last modified — server-side, via Allure's RQL `__search` endpoint with `createdBy = "<owner>" or lastModifiedBy = "<owner>"`. Pagination stays consistent (no client-side post-filter on the owner axis). Username is validated against `^[A-Za-z0-9._@-]+$` to prevent RQL injection through the URL — invalid input raises `ValueError`.
+- New `_build_owner_rql` helper in `tools.py`, unit-tested for the happy path (jdoe, j.doe, jdoe-bot, j_doe, jdoe@corp) and against 7 injection-style inputs (embedded quotes, RQL keywords, backslash, empty, trailing space).
+
+### Changed
+- `allure_list_test_cases` now selects the upstream endpoint based on the filters in play:
+  - Without `owner`: keeps using `GET /testcase` for compatibility — compact projection (audit fields and tags are absent and surface as `""` / `[]`), native server-side `automated` filter.
+  - With `owner`: uses `GET /testcase/__search?rql=...` — full projection (audit fields and tags are populated). Allure's `__search` does not accept `automated` as a query parameter, so when both `owner` and `automated` are set the `automated` filter is applied client-side after the page is fetched; this is documented in the tool docstring.
+- The `owner` semantics intentionally mean "creator OR last modifier", not "assignee". Allure TestOps does not expose a separate `owner` field in RQL on most deployments — the `createdBy`/`lastModifiedBy` union is the closest stable proxy for "TCs I touched". The previous draft of this entry mentioned `owner_username`/`owner_full_name` fields; those have been removed because the corresponding Allure column does not exist on the deployments we tested.
+
+### Fixed
+- `_test_case_summary` no longer emits `None` for missing audit fields (Pydantic rejects `None` for `str` fields) and tolerates malformed `tags` entries (anonymous tags, non-dict items) by skipping them rather than raising.
+
 ## [0.1.3] — 2026-04-30
 
 ### Fixed

@@ -19,6 +19,7 @@ clients do not ask for per-call confirmation.
 from __future__ import annotations
 
 import asyncio
+import re
 from typing import Annotated, Any, Literal
 
 from mcp.server.fastmcp import Context
@@ -75,9 +76,18 @@ def _test_result_summary(r: dict[str, Any]) -> TestResultSummary:
 def _test_case_summary(tc: dict[str, Any]) -> TestCaseSummary:
     """Shape a single ``/testcase`` item into :class:`TestCaseSummary`.
 
-    Allure TestOps returns ref-like fields (``status``, ``layer``) as either
-    a ``{"id": ..., "name": "..."}`` object or ``null`` — never a primitive
-    string. We unwrap to ``name`` so the output schema sees a plain ``str``.
+    Allure mixes shapes across the testcase endpoints:
+
+    * Ref-like fields (``status``, ``layer``) come as ``{"id", "name"}``
+      objects or ``null`` — unwrapped to ``name``.
+    * Audit fields (``createdBy``, ``lastModifiedBy``) come as plain
+      username strings (e.g. ``"system"``), or ``null`` / missing.
+    * ``tags`` is a list of ``{"id", "name"}`` rows; we keep only the names.
+
+    The compact projection of plain ``GET /testcase`` omits the audit
+    fields and tags entirely (they appear only on ``__search`` and detail
+    responses), which is fine — missing keys collapse to ``""`` / ``[]``
+    and the structured-output schema still validates.
     """
     return {
         "id": int(tc["id"]),
@@ -85,7 +95,37 @@ def _test_case_summary(tc: dict[str, Any]) -> TestCaseSummary:
         "automated": bool(tc.get("automated", False)),
         "status": (tc.get("status") or {}).get("name", ""),
         "layer": (tc.get("layer") or {}).get("name", ""),
+        "created_by": tc.get("createdBy") or "",
+        "last_modified_by": tc.get("lastModifiedBy") or "",
+        "tags": [t.get("name", "") for t in (tc.get("tags") or []) if isinstance(t, dict) and t.get("name")],
     }
+
+
+# Allure usernames are alphanumeric plus a small punctuation set (``.``,
+# ``_``, ``-``, ``@``). Restricting input to that alphabet kills RQL
+# injection at the boundary — no need to escape inside the query string,
+# which Allure's RQL parser handles inconsistently across versions.
+_RQL_USERNAME_RE = re.compile(r"^[A-Za-z0-9._@-]+$")
+
+
+def _build_owner_rql(owner: str) -> str:
+    """Build the RQL clause for "TCs touched by user ``owner``".
+
+    Allure's ``GET /testcase/__search`` does not expose an ``owner`` field
+    in its query language (the testcase entity simply doesn't carry a
+    separate owner column on most deployments). The closest stable proxy
+    is "I created it OR I last modified it", which maps to::
+
+        createdBy = "<owner>" or lastModifiedBy = "<owner>"
+
+    Raises:
+        ValueError: if ``owner`` contains characters outside Allure's
+            username alphabet (a defence against RQL-injection — the
+            input is interpolated into a query string).
+    """
+    if not _RQL_USERNAME_RE.fullmatch(owner):
+        raise ValueError(f"owner must be a plain Allure username (letters, digits, '.', '_', '-', '@'); got {owner!r}")
+    return f'createdBy = "{owner}" or lastModifiedBy = "{owner}"'
 
 
 async def _report(ctx: Context, progress: float, message: str) -> None:
@@ -544,31 +584,70 @@ async def allure_list_test_cases(
         bool | None,
         Field(default=None, description="True: only automated. False: only manual. None: both."),
     ] = None,
+    owner: Annotated[
+        str | None,
+        Field(
+            default=None,
+            max_length=255,
+            description=(
+                "Allure username — narrows the result to TCs where the user is the creator "
+                "OR the last modifier. Applied server-side via Allure RQL (see docstring)."
+            ),
+        ),
+    ] = None,
     page: Annotated[int, Field(default=0, ge=0, le=10_000, description="0-based page.")] = 0,
     size: Annotated[int, Field(default=50, ge=1, le=200, description="Items per page (1-200).")] = 50,
 ) -> TestCasesListOutput:
-    """List test cases for a project with optional manual/automated filter.
+    """List test cases for a project with optional automation and ownership filters.
 
-    Each TC returns id, name, automation flag, status and layer (e.g.
-    ``UNIT``, ``API``, ``E2E``).
+    Each TC carries ``id``, ``name``, ``automated``, ``status``, ``layer``
+    (e.g. ``UNIT``, ``API``, ``E2E``), the ``createdBy`` / ``lastModifiedBy``
+    audit usernames, and a flat list of tag names. **Caveat:** the audit
+    fields and ``tags`` are only populated when ``owner`` is set, because
+    Allure's plain ``/testcase`` endpoint returns a compact projection
+    that omits them — the ``owner`` path uses ``__search`` which returns
+    the full projection.
 
     Args:
         project_id: Allure project ID.
         ctx: MCP Context (auto-injected by FastMCP for progress reporting).
-        automated: ``True`` — only automated, ``False`` — only manual, ``None`` — both.
+        automated: ``True`` — only automated, ``False`` — only manual,
+            ``None`` — both.
+        owner: Optional Allure username. When set, the response is narrowed
+            to TCs where ``createdBy = owner OR lastModifiedBy = owner``
+            (case-sensitive, exact match), enforced **server-side** via
+            Allure's RQL ``__search`` endpoint. The username must contain
+            only letters, digits or ``.`` ``_`` ``-`` ``@`` — anything
+            else is rejected with ``ValueError`` to prevent RQL injection.
+
+            **Why "creator/modifier" and not "owner".** Allure TestOps does
+            not expose a separate ``owner`` field in RQL on most
+            deployments — the closest stable proxy for "TCs I touched" is
+            the union of ``createdBy`` and ``lastModifiedBy``.
+
+            **Trade-off when ``owner`` is set.** ``__search`` does not
+            accept the ``automated`` query parameter, so an ``automated``
+            filter combined with ``owner`` is applied **client-side after
+            the page is fetched**. ``pagination`` then reflects the raw
+            owner-filtered set, not the further automation-filtered view —
+            a fetched page of 50 may shrink. Raise ``size`` (max 200) or
+            iterate ``page`` for full coverage.
         page: 0-based page index.
         size: Items per page (1-200; default 50).
 
     Returns:
         dict with keys:
             - ``project_id`` (int)
-            - ``count`` (int)
-            - ``pagination`` (dict)
-            - ``test_cases`` (list): ``id`` / ``name`` / ``automated`` / ``status`` / ``layer``
+            - ``count`` (int): items in this response (post any client-side ``automated`` filter)
+            - ``pagination`` (dict): raw Allure paging
+            - ``test_cases`` (list): each item carries ``id`` / ``name`` /
+              ``automated`` / ``status`` / ``layer`` / ``created_by`` /
+              ``last_modified_by`` / ``tags``
 
     Examples:
         - "How many manual TCs does project 63 have?" -> ``project_id=63, automated=False``, read ``pagination.total``
         - "First 200 automated TCs" -> ``automated=True, size=200``
+        - "My manual TCs in project 63" -> ``project_id=63, automated=False, owner="jdoe", size=200``
 
         Don't use when:
         - You need just the automation % (``allure_get_project_statistics``).
@@ -576,11 +655,29 @@ async def allure_list_test_cases(
     try:
         client = get_client()
         await _report(ctx, 0.1, f"listing test cases for project {project_id}")
-        params: dict[str, object] = {"projectId": project_id, "page": page, "size": size}
-        if automated is not None:
-            params["automated"] = "true" if automated else "false"
-        data = await asyncio.to_thread(client.get, "/testcase", params)
-        test_cases: list[TestCaseSummary] = [_test_case_summary(tc) for tc in data.get("content", [])]
+
+        if owner:
+            # __search path: server-side ownership filter via RQL, rich projection.
+            rql = _build_owner_rql(owner)
+            params: dict[str, object] = {
+                "projectId": project_id,
+                "rql": rql,
+                "page": page,
+                "size": size,
+            }
+            data = await asyncio.to_thread(client.get, "/testcase/__search", params)
+            raw = data.get("content", [])
+            if automated is not None:
+                raw = [tc for tc in raw if bool(tc.get("automated", False)) is automated]
+        else:
+            # Plain /testcase path: native automated filter, compact projection.
+            params = {"projectId": project_id, "page": page, "size": size}
+            if automated is not None:
+                params["automated"] = "true" if automated else "false"
+            data = await asyncio.to_thread(client.get, "/testcase", params)
+            raw = data.get("content", [])
+
+        test_cases: list[TestCaseSummary] = [_test_case_summary(tc) for tc in raw]
         await _report(ctx, 1.0, f"{len(test_cases)} test cases fetched")
         result: TestCasesListOutput = {
             "project_id": project_id,
@@ -588,10 +685,17 @@ async def allure_list_test_cases(
             "pagination": pagination_from(data),  # type: ignore[typeddict-item]
             "test_cases": test_cases,
         }
-        md = f"## Test cases for project {project_id} ({len(test_cases)} shown)\n\n" + "\n".join(
+        header = f"## Test cases for project {project_id} ({len(test_cases)} shown"
+        if owner:
+            header += f", touched by '{owner}'"
+        header += ")\n\n"
+        md = header + "\n".join(
             [
                 f"- **#{tc['id']}** {tc['name']} "
-                f"({'auto' if tc['automated'] else 'manual'}, {tc['layer'] or 'no-layer'})"
+                f"({'auto' if tc['automated'] else 'manual'}, {tc['layer'] or 'no-layer'}"
+                + (f", by {tc['created_by']}" if tc["created_by"] else "")
+                + (f", tags: {', '.join(tc['tags'])}" if tc["tags"] else "")
+                + ")"
                 for tc in test_cases
             ]
         )
