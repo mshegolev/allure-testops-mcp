@@ -1,0 +1,65 @@
+name: Publish to MCP Registry
+
+# Publishes server.json to the official MCP Registry
+# (registry.modelcontextprotocol.io). Runs on a version tag push — in
+# parallel with the PyPI publish workflow — and can also be dispatched
+# manually to (re)publish whatever version server.json currently declares.
+#
+# The registry validates that the PyPI package already exists and that its
+# README carries the `<!-- mcp-name: ... -->` marker, so this job waits for
+# PyPI to serve the version before calling mcp-publisher.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write # GitHub OIDC — proves ownership of the io.github.mshegolev namespace
+  contents: read
+
+jobs:
+  publish-mcp:
+    name: Publish server.json to MCP Registry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Read & validate version from server.json
+        id: ver
+        run: |
+          V=$(jq -r '.version' server.json)
+          PKG=$(jq -r '.packages[0].version' server.json)
+          echo "top-level=$V  package=$PKG"
+          if [ "$V" != "$PKG" ]; then
+            echo "::error::server.json top-level version ($V) != package version ($PKG)"
+            exit 1
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for PyPI to serve this version
+        env:
+          V: ${{ steps.ver.outputs.version }}
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsSL "https://pypi.org/simple/allure-testops-mcp/" \
+                 | grep -q "allure_testops_mcp-$V"; then
+              echo "PyPI is serving $V"
+              exit 0
+            fi
+            echo "waiting for PyPI to serve $V ($i/30)…"
+            sleep 10
+          done
+          echo "::error::PyPI did not serve $V within ~5 minutes"
+          exit 1
+
+      - name: Install mcp-publisher
+        run: |
+          curl -L "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher
+
+      - name: Authenticate to MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server to MCP Registry
+        run: ./mcp-publisher publish
