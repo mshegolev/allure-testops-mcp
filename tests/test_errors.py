@@ -34,9 +34,11 @@ def _http_error_for(url: str, status: int, body: str = "") -> requests.HTTPError
 @pytest.mark.parametrize(
     "status,fragment",
     [
+        (400, "rejected the payload"),
         (401, "ALLURE_TOKEN"),
         (403, "permission"),
         (404, "allure_list_projects"),
+        (409, "conflict"),
         (429, "rate-limited"),
         (502, "transient"),
     ],

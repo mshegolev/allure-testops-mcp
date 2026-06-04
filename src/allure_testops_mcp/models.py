@@ -142,3 +142,37 @@ class TestCasesListOutput(TypedDict):
     count: int
     pagination: PaginationMeta
     test_cases: list[TestCaseSummary]
+
+
+# ── Test-case writes (opt-in via ALLURE_ENABLE_WRITE) ───────────────────────
+
+
+class TestCaseCreated(TypedDict):
+    """Output for :func:`allure_create_test_case`.
+
+    ``url`` carries a best-effort deep-link to the test case in the Allure UI;
+    it is ``None`` when ``ALLURE_URL`` is unset or the project id is unknown
+    at response time.
+    """
+
+    id: int
+    name: str
+    project_id: int
+    url: str | None
+
+
+class TestCaseUpdated(TypedDict):
+    """Output for :func:`allure_update_test_case`.
+
+    ``updated_fields`` reflects the keys that were actually sent to Allure
+    (after ``None`` stripping) — useful for the agent's audit trail.
+    """
+
+    id: int
+    name: str
+    updated_fields: list[str]
+
+
+class TestCaseDeleted(TypedDict):
+    id: int
+    deleted: bool
