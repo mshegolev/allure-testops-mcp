@@ -38,10 +38,15 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 **Test cases**
 - `allure_list_test_cases` — test cases with automated/manual filter (each result also carries its layer, e.g. `UNIT` / `API` / `E2E`)
 
-**Write — opt-in** (set `ALLURE_ENABLE_WRITE=true` to register these)
-- `allure_create_test_case` — create a new test case in a project
-- `allure_update_test_case` — partial update (only the fields you pass are changed)
-- `allure_delete_test_case` — permanent delete; carries `destructiveHint: True` and requires an explicit `confirm=true` flag
+**Test-case CRUD — opt-in write tools** _(new in 0.3.0)_
+
+Off by default — the server is read-only unless you set `ALLURE_ENABLE_WRITE=true`. When enabled, three more tools register, giving an agent full create / update / delete over test cases:
+
+- `allure_create_test_case` — create a TC in a project (`project_id`, `name`, plus optional `description`, `precondition`, `expected_result`, `automated`, `status`, `layer`, `tags`)
+- `allure_update_test_case` — partial update; only the fields you pass are changed, the rest are left untouched
+- `allure_delete_test_case` — **permanent** delete; carries `destructiveHint: True` (compliant clients ask for confirmation) **and** requires an explicit `confirm=true` argument as a second guard
+
+Without the flag these tools are never imported, so the agent doesn't even see them — see [Security considerations](#security-considerations).
 
 ## Installation
 
@@ -95,6 +100,32 @@ claude mcp list
 # allure: uvx --from allure-testops-mcp allure-testops-mcp - ✓ Connected
 ```
 
+## Updating
+
+There's no in-process auto-update — the server is a stdio process that your client respawns each session, so the running version is decided entirely by the `uvx` invocation. `uvx` caches the resolved environment under `~/.cache/uv`, so a machine that already ran an older version keeps using it until you trigger a refresh.
+
+```bash
+# force the latest release on the next run
+uvx --refresh --from allure-testops-mcp allure-testops-mcp
+
+# or drop the cached env so the next run re-resolves
+uv cache clean allure-testops-mcp
+```
+
+Then reconnect the server in your client (`/mcp` → reconnect, or restart the session).
+
+To control the version from config instead, edit `args`:
+
+```jsonc
+// A. Pin a version — deterministic; bump consciously
+"args": ["--from", "allure-testops-mcp==0.3.0", "allure-testops-mcp"]
+
+// B. Always latest on every start — adds a PyPI lookup per launch
+"args": ["--refresh", "--from", "allure-testops-mcp", "allure-testops-mcp"]
+```
+
+Pinning (A) is recommended for stability; `--refresh` (B) trades a little startup latency for always being current.
+
 ## Environment variables
 
 | Variable | Required | Description |
@@ -113,6 +144,13 @@ In Claude Code:
 - "Failed tests in the last launch for project 175"
 - "Automation rate for project 842"
 - "Test results in launch 12345 with status FAILED"
+
+With `ALLURE_ENABLE_WRITE=true` you can also drive test-case CRUD in natural language:
+
+- "Create a Draft manual TC named 'Login flow' in project 63"
+- "Add an automated smoke TC in project 63 tagged `smoke`, layer `E2E`"
+- "Rename test case 555 to 'Login (rewritten)' and set status Active"
+- "Delete test case 555" — the agent must pass `confirm=true`, and a compliant client also prompts you before it runs
 
 ## Security considerations
 
