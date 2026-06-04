@@ -124,6 +124,40 @@ class AllureClient:
         response.raise_for_status()
         return response.json()
 
+    def post(self, path: str, json_body: dict[str, Any] | None = None) -> Any:
+        """Perform ``POST {base}/{path}`` with an optional JSON body."""
+        kwargs: dict[str, Any] = {"timeout": 30}
+        if json_body is not None:
+            kwargs["json"] = json_body
+        response = self.session.post(f"{self.base}/{path.lstrip('/')}", **kwargs)
+        response.raise_for_status()
+        if not response.content:
+            return None
+        return response.json()
+
+    def patch(self, path: str, json_body: dict[str, Any] | None = None) -> Any:
+        """Perform ``PATCH {base}/{path}`` with an optional JSON body."""
+        kwargs: dict[str, Any] = {"timeout": 30}
+        if json_body is not None:
+            kwargs["json"] = json_body
+        response = self.session.patch(f"{self.base}/{path.lstrip('/')}", **kwargs)
+        response.raise_for_status()
+        if not response.content:
+            return None
+        return response.json()
+
+    def delete(self, path: str) -> Any:
+        """Perform ``DELETE {base}/{path}``.
+
+        Returns ``None`` for empty responses (HTTP 204 or empty body); a
+        parsed JSON object otherwise.
+        """
+        response = self.session.delete(f"{self.base}/{path.lstrip('/')}", timeout=30)
+        response.raise_for_status()
+        if response.status_code == 204 or not response.content:
+            return None
+        return response.json()
+
     def close(self) -> None:
         """Close the underlying HTTP session (called from lifespan on shutdown)."""
         self.session.close()

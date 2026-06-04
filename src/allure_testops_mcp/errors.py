@@ -29,6 +29,19 @@ def handle(exc: Exception, action: str) -> str:
 
     if isinstance(exc, requests.HTTPError):
         code = exc.response.status_code if exc.response is not None else None
+        if code == 400:
+            body = ""
+            if exc.response is not None:
+                try:
+                    body = exc.response.text[:200]
+                except Exception:
+                    pass
+            return (
+                f"Error: Allure rejected the payload (HTTP 400) while {action}. "
+                "Check that referenced names (status, layer, tags) exist in this "
+                "project and that all required fields are set. "
+                f"Response: {body}"
+            )
         if code == 401:
             return (
                 f"Error: authentication failed (HTTP 401) while {action}. "
@@ -46,6 +59,18 @@ def handle(exc: Exception, action: str) -> str:
                 f"Error: resource not found (HTTP 404) while {action}. "
                 "Check project_id / launch_id / IDs and spelling. "
                 "Use allure_list_projects to discover valid project IDs."
+            )
+        if code == 409:
+            body = ""
+            if exc.response is not None:
+                try:
+                    body = exc.response.text[:200]
+                except Exception:
+                    pass
+            return (
+                f"Error: Allure conflict (HTTP 409) while {action}. "
+                "Likely a duplicate name or stale state — re-fetch the entity and retry. "
+                f"Response: {body}"
             )
         if code == 429:
             return (

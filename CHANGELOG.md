@@ -3,6 +3,15 @@
 All notable changes to `allure-testops-mcp` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions use [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- Three opt-in write tools for test cases — `allure_create_test_case`, `allure_update_test_case`, `allure_delete_test_case`. Gated behind a new `ALLURE_ENABLE_WRITE` environment variable so the default server stays read-only; when unset or `false`, the tools are not registered and the agent doesn't see them at all.
+- `allure_delete_test_case` carries `destructiveHint: True` (compliant MCP clients ask for per-call confirmation) and additionally requires an explicit `confirm=true` argument as a belt-and-braces guard for clients that ignore the annotation.
+- `AllureClient.post` / `patch` / `delete` HTTP methods (same session, timeout and error semantics as the existing `get`; `delete` returns `None` on HTTP 204).
+- HTTP 400 and 409 error mappings — surface Allure's payload-rejection / conflict messages with actionable hints (check status/layer names exist; re-fetch on stale state).
+- `TestCaseCreated`, `TestCaseUpdated`, `TestCaseDeleted` TypedDicts for the new tools' structured output.
+
 ## [0.2.1] — 2026-04-30
 
 Internal cleanup pass; no behavioural or public-API changes.
