@@ -5,6 +5,11 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-06-05
+
+### Changed
+- Docs: README now documents the test-case CRUD write tools (`allure_create_test_case` / `allure_update_test_case` / `allure_delete_test_case`) with natural-language usage examples, and adds an **Updating** section explaining how `uvx` version resolution / cache refresh works and how to pin a version. No code or public-API changes.
+
 ## [0.3.0] — 2026-06-05
 
 ### Added
