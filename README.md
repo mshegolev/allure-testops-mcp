@@ -21,6 +21,8 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 - **Pydantic input validation** — every argument has typed constraints (ranges, lengths, literals) auto-exposed as JSON Schema.
 - **Pagination** — list tools return a `pagination` block with `page`, `total`, `has_more`, `next_page`.
 - **Progress reporting via MCP Context** — tools that make multiple API calls (`allure_get_project_statistics`, `allure_search_failed_tests`) and `allure_list_test_cases` emit `ctx.report_progress` + `ctx.info` events so compatible clients can render progress bars and step labels.
+- **Version-agnostic update verb** — `allure_update_test_case` issues `PATCH` and transparently falls back to `PUT` on HTTP 405, so it works across Allure deployments that expose only one of the two verbs.
+- **Single source of truth for version** — `__version__` is derived from installed package metadata, and a consistency test asserts `pyproject.toml` matches both `server.json` version fields, so the published version can't drift.
 
 ## Features
 
@@ -183,6 +185,20 @@ git clone https://github.com/mshegolev/allure-testops-mcp.git
 cd allure-testops-mcp
 pip install -e '.[dev]'
 pytest
+```
+
+### Live-instance integration tests
+
+The unit suite mocks all HTTP. There is also an opt-in integration suite that runs a real
+create → update → delete lifecycle against a live Allure project. It's deselected by default and
+skips itself unless credentials are present:
+
+```bash
+export ALLURE_URL=https://allure.example.com
+export ALLURE_TOKEN=...                 # token with write scope
+export ALLURE_ENABLE_WRITE=true
+export ALLURE_TEST_PROJECT_ID=63        # a throwaway project you can write to
+pytest -m integration tests/integration -v
 ```
 
 Run the server directly (stdio transport, waits on stdin for MCP messages):

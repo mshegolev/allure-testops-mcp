@@ -5,6 +5,20 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-05
+
+Milestone v0.4 — quality & robustness hardening. Three of four planned phases shipped; the name→ID lookup phase is blocked pending live-instance verification (see `.planning/ROADMAP.md`).
+
+### Added
+- **Live-instance integration test suite** (`tests/integration/test_write_live.py`) exercising the real create→update→delete lifecycle. Marked `integration`, deselected by default (`addopts = -m 'not integration'`) and self-skipping unless `ALLURE_URL` / `ALLURE_TOKEN` / `ALLURE_ENABLE_WRITE=true` / `ALLURE_TEST_PROJECT_ID` are set. Run with `pytest -m integration`.
+- **Version consistency test** (`tests/test_version_consistency.py`) asserting `pyproject.toml` matches both `server.json` version fields and that `__version__` is metadata-derived — guards against the version drift seen in earlier releases.
+- `AllureClient.put` — symmetric with `patch`, used as the update fallback verb.
+- `pytest` configuration in `pyproject.toml` (`testpaths`, `pythonpath = ["src"]`, `integration` marker) so a bare `pytest` works from a source checkout.
+
+### Changed
+- **`allure_update_test_case` now hardens the update verb**: it issues `PATCH /testcase/{id}` and, on HTTP 405 Method Not Allowed, transparently retries with `PUT`. This survives Allure deployments/versions that expose only one of the two verbs. Any non-405 error still propagates unchanged.
+- **`__version__` is now derived from installed package metadata** (`importlib.metadata.version`) instead of a hand-maintained literal, so it can no longer drift from the published package (falls back to `0+unknown` on a bare source checkout).
+
 ## [0.3.1] — 2026-06-05
 
 ### Changed

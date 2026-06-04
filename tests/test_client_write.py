@@ -94,6 +94,33 @@ def test_patch_raises_on_409(client, http):
         client.patch("/testcase/7", {"name": "x"})
 
 
+# ── put ─────────────────────────────────────────────────────────────────────
+
+
+def test_put_sends_json_body_and_returns_parsed_json(client, http):
+    captured: dict[str, object] = {}
+
+    def callback(request):
+        captured["body"] = request.body
+        return (200, {}, '{"id": 7, "name": "put-updated"}')
+
+    http.add_callback(responses.PUT, f"{BASE}/api/rs/testcase/7", callback=callback)
+    result = client.put("/testcase/7", {"name": "put-updated"})
+    assert result == {"id": 7, "name": "put-updated"}
+    assert captured["body"] == b'{"name": "put-updated"}'
+
+
+def test_put_returns_none_on_204(client, http):
+    http.add(responses.PUT, f"{BASE}/api/rs/testcase/7", status=204)
+    assert client.put("/testcase/7", {"name": "x"}) is None
+
+
+def test_put_raises_on_4xx(client, http):
+    http.add(responses.PUT, f"{BASE}/api/rs/testcase/7", status=400, body="bad")
+    with pytest.raises(requests.HTTPError):
+        client.put("/testcase/7", {"name": "x"})
+
+
 # ── delete ──────────────────────────────────────────────────────────────────
 
 
