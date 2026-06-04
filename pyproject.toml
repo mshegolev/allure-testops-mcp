@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "allure-testops-mcp"
-version = "0.3.1"
+version = "0.4.0"
 description = "MCP server for Allure TestOps — projects, launches, test cases, test results"
 readme = "README.md"
 license = "MIT"
@@ -38,6 +38,7 @@ dev = [
     "pytest>=7",
     "ruff>=0.5",
     "responses>=0.25",
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [project.scripts]
@@ -56,3 +57,16 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Make `pytest` work from a bare source checkout (src layout) without an
+# editable install. CI still does `pip install -e .[dev]`, which also works.
+pythonpath = ["src"]
+# Integration tests hit a live Allure instance; they are deselected by default
+# and additionally skip themselves unless the required ALLURE_* env vars are set.
+# Run them explicitly with: pytest -m integration
+addopts = "-m 'not integration'"
+markers = [
+    "integration: live-instance test requiring ALLURE_URL / ALLURE_TOKEN / ALLURE_ENABLE_WRITE / ALLURE_TEST_PROJECT_ID",
+]

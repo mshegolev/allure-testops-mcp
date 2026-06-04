@@ -27,6 +27,7 @@ from __future__ import annotations
 import os
 from typing import Annotated, Any, Literal
 
+import requests
 from pydantic import Field
 
 from allure_testops_mcp import output
@@ -81,6 +82,25 @@ _CALLER_FIELDS = (
     "layer",
     "tags",
 )
+
+
+def _patch_or_put(client: Any, path: str, body: dict[str, Any]) -> Any:
+    """Update via PATCH, falling back to PUT on HTTP 405.
+
+    Allure's test-case update verb varies by deployment/version — some
+    instances expose ``PATCH /testcase/{id}``, others only ``PUT``. Rather
+    than pinning one (and silently breaking on the other), we try PATCH and,
+    if the server answers 405 Method Not Allowed, transparently retry with
+    PUT. Any other HTTP error propagates unchanged so the caller's error
+    mapping still surfaces 400/404/409/etc.
+    """
+    try:
+        return client.patch(path, body)
+    except requests.HTTPError as exc:
+        resp = getattr(exc, "response", None)
+        if resp is not None and resp.status_code == 405:
+            return client.put(path, body)
+        raise
 
 
 def _deep_link(project_id: int, test_case_id: int) -> str | None:
@@ -243,7 +263,7 @@ def allure_update_test_case(
     try:
         client = get_client()
         body = _build_testcase_body(raw)
-        updated = client.patch(f"/testcase/{test_case_id}", body) or {}
+        updated = _patch_or_put(client, f"/testcase/{test_case_id}", body) or {}
         updated_fields = [k for k in _CALLER_FIELDS if raw.get(k) is not None]
         result: TestCaseUpdated = {
             "id": int(updated.get("id", test_case_id)),

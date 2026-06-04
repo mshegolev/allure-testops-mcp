@@ -13,3 +13,6 @@ build/
 !.env.example
 .DS_Store
 *.log
+
+# Serena MCP local tool cache (machine-specific)
+.serena/

@@ -200,6 +200,36 @@ def test_update_test_case_surfaces_404(patched_client, http):
     assert "404" in str(exc_info.value) or "not found" in str(exc_info.value).lower()
 
 
+def test_update_falls_back_to_put_on_405(patched_client, http):
+    """Deployments that expose only PUT answer PATCH with 405 — the tool
+    transparently retries with PUT and succeeds."""
+    captured: dict[str, object] = {}
+
+    def put_cb(request):
+        captured["put_body"] = request.body
+        return (200, {}, '{"id": 7, "name": "renamed"}')
+
+    http.add(responses.PATCH, f"{BASE}/api/rs/testcase/7", status=405, body="method not allowed")
+    http.add_callback(responses.PUT, f"{BASE}/api/rs/testcase/7", callback=put_cb)
+
+    result = allure_update_test_case(test_case_id=7, name="renamed")
+    assert result.structuredContent["id"] == 7
+    assert result.structuredContent["updated_fields"] == ["name"]
+    # PUT received the same mapped body PATCH would have.
+    assert captured["put_body"] == b'{"name": "renamed"}'
+    # Both verbs were exercised: PATCH (405) then PUT (200).
+    assert [c.request.method for c in http.calls] == ["PATCH", "PUT"]
+
+
+def test_update_does_not_fall_back_on_non_405(patched_client, http):
+    """A 409 (or any non-405) must propagate, not trigger a PUT retry."""
+    http.add(responses.PATCH, f"{BASE}/api/rs/testcase/7", status=409, body="conflict")
+    with pytest.raises(ToolError):
+        allure_update_test_case(test_case_id=7, name="x")
+    # Only the PATCH was attempted — no silent PUT fallback on conflict.
+    assert [c.request.method for c in http.calls] == ["PATCH"]
+
+
 # ── allure_delete_test_case ─────────────────────────────────────────────────
 
 

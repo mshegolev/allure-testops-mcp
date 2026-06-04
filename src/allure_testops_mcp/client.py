@@ -146,6 +146,21 @@ class AllureClient:
             return None
         return response.json()
 
+    def put(self, path: str, json_body: dict[str, Any] | None = None) -> Any:
+        """Perform ``PUT {base}/{path}`` with an optional JSON body.
+
+        Symmetric with :meth:`patch`. Used as the fallback verb for updates
+        on Allure deployments that expose PUT rather than PATCH (HTTP 405).
+        """
+        kwargs: dict[str, Any] = {"timeout": 30}
+        if json_body is not None:
+            kwargs["json"] = json_body
+        response = self.session.put(f"{self.base}/{path.lstrip('/')}", **kwargs)
+        response.raise_for_status()
+        if not response.content:
+            return None
+        return response.json()
+
     def delete(self, path: str) -> Any:
         """Perform ``DELETE {base}/{path}``.
 
