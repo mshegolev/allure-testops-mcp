@@ -5,6 +5,8 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-05
+
 ### Added
 - Three opt-in write tools for test cases — `allure_create_test_case`, `allure_update_test_case`, `allure_delete_test_case`. Gated behind a new `ALLURE_ENABLE_WRITE` environment variable so the default server stays read-only; when unset or `false`, the tools are not registered and the agent doesn't see them at all.
 - `allure_delete_test_case` carries `destructiveHint: True` (compliant MCP clients ask for per-call confirmation) and additionally requires an explicit `confirm=true` argument as a belt-and-braces guard for clients that ignore the annotation.
