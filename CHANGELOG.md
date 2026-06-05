@@ -5,6 +5,13 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-05
+
+Milestone v0.6 — single test-case detail. Verified end-to-end against a live Allure TestOps instance.
+
+### Added
+- **`allure_get_test_case`** — fetch one test case's full content: `description`, `precondition`, `expected_result`, `status`, `layer`, `tags`, audit usernames, and the manual scenario **steps** (flattened depth-first with a `depth` marker; each step has `keyword`, `name`, `expected_result`). `include_scenario=false` skips the extra `/scenario` call. Complements `allure_list_test_cases` (summaries) — this returns the actual test body. Default server now exposes **9** read-only tools (was 8).
+
 ## [0.5.0] — 2026-06-05
 
 Milestone v0.5 — reference-data discovery tools. Read tools verified end-to-end against a live Allure TestOps instance.

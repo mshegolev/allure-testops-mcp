@@ -1,9 +1,9 @@
 """MCP tools for Allure TestOps.
 
-8 read-only tools covering the main REST API surface — projects, launches,
-test cases, test results, and reference data (statuses, layers). All tools
-declare ``readOnlyHint: True`` so MCP clients do not ask for per-call
-confirmation.
+9 read-only tools covering the main REST API surface — projects, launches,
+test cases (list + single-case detail), test results, and reference data
+(statuses, layers). All tools declare ``readOnlyHint: True`` so MCP clients do
+not ask for per-call confirmation.
 
 **Threading model.**
 
@@ -39,7 +39,9 @@ from allure_testops_mcp.models import (
     ProjectSummary,
     StatusesListOutput,
     StatusRef,
+    TestCaseDetail,
     TestCasesListOutput,
+    TestCaseStepFlat,
     TestCaseSummary,
     TestResultsOutput,
     TestResultSummary,
@@ -807,3 +809,93 @@ def allure_list_layers(
         return output.ok(result, f"## Layers in project {project_id} ({len(layers)})\n\n{md}")  # type: ignore[return-value]
     except Exception as exc:
         output.fail(exc, f"listing layers for project {project_id}")
+
+
+# ── Single test-case detail ─────────────────────────────────────────────────
+
+
+def _flatten_steps(steps: list[dict[str, Any]] | None, depth: int = 0) -> list[TestCaseStepFlat]:
+    """Flatten Allure's recursive scenario step tree into a depth-tagged list.
+
+    Each Allure step may nest child ``steps``; we walk depth-first and record
+    the nesting level so a client can re-indent without recursion.
+    """
+    out: list[TestCaseStepFlat] = []
+    for s in steps or []:
+        out.append(
+            {
+                "depth": depth,
+                "keyword": s.get("keyword") or "",
+                "name": s.get("name") or "",
+                "expected_result": s.get("expectedResult") or "",
+            }
+        )
+        out.extend(_flatten_steps(s.get("steps"), depth + 1))
+    return out
+
+
+@mcp.tool(
+    name="allure_get_test_case",
+    annotations={
+        "title": "Get Test Case",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_get_test_case(
+    test_case_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure test-case ID.")],
+    include_scenario: Annotated[
+        bool, Field(default=True, description="Also fetch the manual scenario steps (one extra call).")
+    ] = True,
+) -> TestCaseDetail:
+    """Get one test case's full detail — fields, status/layer, tags, and steps.
+
+    Unlike ``allure_list_test_cases`` (summaries), this returns the body of a
+    single test case: description, precondition, expected result, and the
+    manual scenario steps (flattened with a ``depth`` marker). Use it to read
+    or review the actual content of a test case.
+
+    Returns:
+        dict with ``id``, ``name``, ``project_id``, ``automated``,
+        ``description``, ``precondition``, ``expected_result``, ``status``,
+        ``layer``, ``tags`` and ``steps`` (each: ``depth``, ``keyword``,
+        ``name``, ``expected_result``). ``steps`` is empty when
+        ``include_scenario`` is false or the case has none.
+    """
+    try:
+        client = get_client()
+        tc = client.get(f"/testcase/{test_case_id}") or {}
+        steps: list[TestCaseStepFlat] = []
+        if include_scenario:
+            scenario = client.get(f"/testcase/{test_case_id}/scenario") or {}
+            steps = _flatten_steps(scenario.get("steps"))
+        result: TestCaseDetail = {
+            "id": int(tc.get("id", test_case_id)),
+            "name": tc.get("name", ""),
+            "project_id": int(tc.get("projectId", 0) or 0),
+            "automated": bool(tc.get("automated", False)),
+            "description": tc.get("description") or "",
+            "precondition": tc.get("precondition") or "",
+            "expected_result": tc.get("expectedResult") or "",
+            "status": (tc.get("status") or {}).get("name", ""),
+            "layer": (tc.get("layer") or {}).get("name", ""),
+            "tags": [t["name"] for t in (tc.get("tags") or []) if isinstance(t, dict) and t.get("name")],
+            "created_by": tc.get("createdBy") or "",
+            "last_modified_by": tc.get("lastModifiedBy") or "",
+            "steps": steps,
+        }
+        parts = [f"# {result['name']} (#{result['id']})"]
+        meta = f"status: {result['status'] or '—'} · layer: {result['layer'] or '—'} · "
+        meta += "automated" if result["automated"] else "manual"
+        parts.append(meta)
+        if result["precondition"]:
+            parts.append(f"\n**Precondition:** {result['precondition']}")
+        if steps:
+            parts.append("\n**Steps:**")
+            parts.extend(f"{'  ' * s['depth']}- {s['keyword'] + ' ' if s['keyword'] else ''}{s['name']}" for s in steps)
+        return output.ok(result, "\n".join(parts))  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"getting test case {test_case_id}")

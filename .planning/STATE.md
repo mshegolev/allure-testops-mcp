@@ -1,12 +1,12 @@
 # STATE
 
-**Milestone:** v0.5 — Reference-data discovery tools
-**Status:** Phase 1 ✅ complete (shipped v0.5.0); milestone effectively done (1 phase)
+**Milestone:** v0.6 — Single test-case detail
+**Status:** Phase 1 ✅ complete (shipped v0.6.0)
 **Mode:** /gsd-autonomous
 
 ## Progress
-- Phase 1 (List statuses & layers): ✅ complete (v0.5.0), live-verified
+- Phase 1 (Get test-case detail): ✅ complete (v0.6.0), live-verified
 
 ## Last session
-2026-06-05 — Scoped v0.5 around read-only reference-data tools (live-verifiable with the read token).
-Shipped allure_list_statuses / allure_list_layers, verified live against real Allure.
+2026-06-05 — Write-path remains blocked (token is ROLE_GUEST, read-only). Continued on read-only,
+live-verifiable scope: shipped allure_get_test_case (single-TC detail + scenario steps), verified live.
