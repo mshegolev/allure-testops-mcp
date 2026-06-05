@@ -28,3 +28,26 @@ provide) to confirm the endpoints and verify end-to-end via `tests/integration/t
 1. Confirm list endpoints (likely `GET /api/rs/...` for statuses/layers, project-scoped).
 2. Add `_resolve_ref(project_id, kind, name) -> id`, cached; map name→id then reuse the id path above.
 3. Verify with the integration suite (`test_status_layer_by_name`).
+
+---
+
+## v0.4.2 — COMPLETE (name→id resolver)
+
+**Live-confirmed endpoints** (against allure.services.mts.ru, project 2031):
+- statuses: `GET /api/rs/status?projectId=…` (paged) — 23 found; `Draft=-1`, `Active=-3`, `Blocked=5`
+- layers:   `GET /api/rs/testlayer?projectId=…` (paged) — 19 found; `API Tests=-3`, `UI Tests=-2`
+
+**Shipped:**
+- `_list_refs` (paged), `_resolve_ref` (case-insensitive, actionable not-found error), `_project_id_of`.
+- create + update resolve `status`/`layer` names → ids, then emit the correct shape (nested `{id}` / flat `statusId`,`testLayerId`).
+- Relaxed `status_id`/`layer_id` bounds to int32 (built-in ids are negative — the old `ge=1` would reject `Draft=-1`).
+- update accepts names again (v0.4.1 had hard-rejected them).
+
+**Verified:**
+- Resolver verified LIVE read-only (`draft`→-1, `API Tests`→-3, unknown→error).
+- 129 unit tests pass (incl. resolver paging, case-insensitivity, create/update name→id, unknown-name errors); ruff clean.
+
+**Residual (not blocking):** live create/update/delete mutation needs a **write-scoped** token — the
+aiqa-core token is read-only (create returned HTTP 403, cleanly surfaced). The gated suite
+`tests/integration/test_write_live.py` performs the full live mutation once such a token + project id
+are provided.

@@ -5,6 +5,20 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-06-05
+
+Milestone v0.4 **Phase 1 complete** — status/layer name→id auto-resolution. The list endpoints were confirmed against a live Allure TestOps instance: `GET /api/rs/status?projectId=…` and `GET /api/rs/testlayer?projectId=…` (both paged). The resolver was verified live (read path); the write path is DTO-grounded and unit-tested (live mutation needs a write-scoped token).
+
+### Added
+- **Status/layer names are now auto-resolved to ids.** `allure_create_test_case` and `allure_update_test_case` resolve a `status` / `layer` *name* to its numeric id via the project's status/layer list, then send the correct shape (nested `{id}` on create, flat `statusId` / `testLayerId` on update). An unknown name raises an actionable error listing the valid names. On update the test case's project is looked up first (refs are project-scoped).
+- `_list_refs` / `_resolve_ref` / `_project_id_of` helpers; resolution is case-insensitive and pages through all results.
+
+### Fixed
+- `status_id` / `layer_id` bounds relaxed to the full int32 range — Allure's built-in statuses and layers use **negative** ids (e.g. `Draft = -1`, `API Tests = -3`), which the previous `ge=1` constraint rejected.
+
+### Changed
+- `allure_update_test_case` now accepts a `status` / `layer` **name** again (resolved to an id), reversing the v0.4.1 hard rejection — names just work now, on both create and update.
+
 ## [0.4.1] — 2026-06-05
 
 Milestone v0.4 Phase 1 (partial) — corrected status/layer write shapes. Verified against the official Allure client (`eroshenkoam/allure-testops-utils`): the `TestCase` (create) and `TestCasePatch` (update) DTOs use **different** shapes for status/layer. Full name→id auto-resolution remains pending live-instance verification.

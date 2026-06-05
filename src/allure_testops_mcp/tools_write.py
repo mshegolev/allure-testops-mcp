@@ -148,6 +148,59 @@ def _patch_or_put(client: Any, path: str, body: dict[str, Any]) -> Any:
         raise
 
 
+def _list_refs(client: Any, kind: str, project_id: int) -> dict[str, int]:
+    """Return ``{name: id}`` for a project's statuses or layers.
+
+    Endpoints (confirmed against a live Allure TestOps instance):
+
+    * status → ``GET /status?projectId=…`` (paged)
+    * layer  → ``GET /testlayer?projectId=…`` (paged)
+
+    Built-in refs use negative ids (e.g. ``Draft = -1``, ``API Tests = -3``);
+    custom ones are positive. Pages through ``content`` / ``totalPages``.
+    """
+    path = "/status" if kind == "status" else "/testlayer"
+    refs: dict[str, int] = {}
+    page = 0
+    while True:
+        data = client.get(path, {"projectId": project_id, "page": page, "size": 100}) or {}
+        content = data.get("content", []) or []
+        for item in content:
+            name, rid = item.get("name"), item.get("id")
+            if name is not None and rid is not None:
+                refs[str(name)] = int(rid)
+        page += 1
+        if page >= int(data.get("totalPages", 1) or 1) or not content:
+            break
+    return refs
+
+
+def _resolve_ref(client: Any, kind: str, project_id: int, name: str) -> int:
+    """Resolve a status/layer *name* to its numeric id within a project.
+
+    Case-insensitive. Raises ValueError listing the valid names if the name
+    is not found — an actionable error instead of a downstream 400.
+    """
+    refs = _list_refs(client, kind, project_id)
+    by_lower = {n.lower(): i for n, i in refs.items()}
+    rid = by_lower.get(name.strip().lower())
+    if rid is None:
+        available = ", ".join(sorted(refs)) or "(none)"
+        raise ValueError(f"{kind} '{name}' not found in project {project_id}. Available {kind} names: {available}")
+    return rid
+
+
+def _project_id_of(client: Any, test_case_id: int) -> int:
+    """Fetch a test case's ``projectId`` (needed to resolve project-scoped refs on update)."""
+    tc = client.get(f"/testcase/{test_case_id}") or {}
+    pid = tc.get("projectId")
+    if pid is None:
+        raise ValueError(
+            f"could not determine the project of test case {test_case_id} (needed to resolve status/layer)"
+        )
+    return int(pid)
+
+
 def _deep_link(project_id: int, test_case_id: int) -> str | None:
     """Build the Allure-UI deep link for a test case, or ``None`` if the
     base URL is not set in the process environment."""
@@ -195,20 +248,29 @@ def allure_create_test_case(
     ] = None,
     status_id: Annotated[
         int | None,
-        Field(default=None, ge=1, le=2_147_483_647, description="Numeric status id (takes precedence over status)."),
+        Field(
+            default=None,
+            ge=-2_147_483_648,
+            le=2_147_483_647,
+            description="Numeric status id (takes precedence over status). Built-ins are negative, e.g. Draft=-1.",
+        ),
     ] = None,
     layer: Annotated[
         str | None,
         Field(
             default=None,
             max_length=100,
-            description="Layer name (e.g. 'API', 'E2E'). Must exist server-side. "
-            "Prefer layer_id if you know the numeric id.",
+            description="Layer name (e.g. 'API', 'E2E'). Resolved to its id server-side.",
         ),
     ] = None,
     layer_id: Annotated[
         int | None,
-        Field(default=None, ge=1, le=2_147_483_647, description="Numeric layer id (takes precedence over layer)."),
+        Field(
+            default=None,
+            ge=-2_147_483_648,
+            le=2_147_483_647,
+            description="Numeric layer id (takes precedence over layer). Built-ins are negative, e.g. API Tests=-3.",
+        ),
     ] = None,
     tags: Annotated[
         list[str] | None,
@@ -225,9 +287,10 @@ def allure_create_test_case(
     otherwise this tool is not registered. Surfaces the Allure 400 / 409
     error text on rejection (e.g. unknown status/layer name, duplicate).
 
-    Status and layer can be set by ``status_id`` / ``layer_id`` (the reliable
-    way — sent as Allure's nested id objects) or by ``status`` / ``layer``
-    name (best-effort; some deployments require ids and answer 400).
+    Status and layer accept either a ``status_id`` / ``layer_id`` (used as-is)
+    or a ``status`` / ``layer`` *name*, which is resolved to its id against the
+    project's status/layer list. An unknown name yields an actionable error
+    listing the valid names.
 
     Examples:
         - "Create a Draft TC named 'Login flow' in project 63" ->
@@ -238,6 +301,11 @@ def allure_create_test_case(
         raise ValueError("each tag must be 100 characters or fewer")
     try:
         client = get_client()
+        # Resolve status/layer names to ids against the project's ref lists.
+        if status_id is None and status is not None:
+            status_id, status = _resolve_ref(client, "status", project_id, status), None
+        if layer_id is None and layer is not None:
+            layer_id, layer = _resolve_ref(client, "layer", project_id, layer), None
         body = _build_testcase_body(
             {
                 "project_id": project_id,
@@ -246,9 +314,7 @@ def allure_create_test_case(
                 "precondition": precondition,
                 "expected_result": expected_result,
                 "automated": automated,
-                "status": status,
                 "status_id": status_id,
-                "layer": layer,
                 "layer_id": layer_id,
                 "tags": tags,
             },
@@ -293,19 +359,19 @@ def allure_update_test_case(
     automated: Annotated[bool | None, Field(default=None)] = None,
     status_id: Annotated[
         int | None,
-        Field(default=None, ge=1, le=2_147_483_647, description="Numeric status id. Update is by id, not name."),
+        Field(default=None, ge=-2_147_483_648, le=2_147_483_647, description="Numeric status id (e.g. Draft=-1)."),
     ] = None,
     layer_id: Annotated[
         int | None,
-        Field(default=None, ge=1, le=2_147_483_647, description="Numeric layer id. Update is by id, not name."),
+        Field(default=None, ge=-2_147_483_648, le=2_147_483_647, description="Numeric layer id (e.g. API Tests=-3)."),
     ] = None,
     status: Annotated[
         str | None,
-        Field(default=None, max_length=100, description="Status name — rejected on update; use status_id instead."),
+        Field(default=None, max_length=100, description="Status name — resolved to its id via the TC's project."),
     ] = None,
     layer: Annotated[
         str | None,
-        Field(default=None, max_length=100, description="Layer name — rejected on update; use layer_id instead."),
+        Field(default=None, max_length=100, description="Layer name — resolved to its id via the TC's project."),
     ] = None,
     tags: Annotated[list[str] | None, Field(default=None, max_length=50)] = None,
 ) -> TestCaseUpdated:
@@ -315,29 +381,18 @@ def allure_update_test_case(
     untouched. Pass ``tags=[]`` to clear every tag; omit ``tags`` to leave
     them as-is. Requires ``ALLURE_ENABLE_WRITE=true``.
 
-    Allure's update API addresses status and layer by **numeric id** — pass
-    ``status_id`` / ``layer_id``. Passing a ``status`` / ``layer`` *name* on
-    update raises (the update payload has no nested name field), so look up
-    the id rather than relying on a name that would be silently ignored.
+    Status and layer accept a ``status_id`` / ``layer_id`` (sent as Allure's
+    flat ``statusId`` / ``testLayerId``) or a ``status`` / ``layer`` *name*,
+    which is resolved to its id — this performs an extra lookup of the test
+    case's project. An unknown name yields an actionable error.
 
     Examples:
         - "Rename TC 555 to 'Login (rewritten)'" -> ``test_case_id=555, name="Login (rewritten)"``
         - "Mark TC 555 automated" -> ``test_case_id=555, automated=True``
-        - "Set TC 555 status to id 3" -> ``test_case_id=555, status_id=3``
+        - "Set TC 555 status to Active" -> ``test_case_id=555, status="Active"``
     """
-    raw = {
-        "name": name,
-        "description": description,
-        "precondition": precondition,
-        "expected_result": expected_result,
-        "automated": automated,
-        "status": status,
-        "status_id": status_id,
-        "layer": layer,
-        "layer_id": layer_id,
-        "tags": tags,
-    }
-    if all(v is None for v in raw.values()):
+    provided = (name, description, precondition, expected_result, automated, status, status_id, layer, layer_id, tags)
+    if all(v is None for v in provided):
         output.fail(
             ValueError("nothing to update — pass at least one field to change"),
             f"updating test case {test_case_id}",
@@ -346,6 +401,24 @@ def allure_update_test_case(
         output.fail(ValueError("each tag must be 100 characters or fewer"), f"updating test case {test_case_id}")
     try:
         client = get_client()
+        # Resolve status/layer names to ids. Refs are project-scoped, so we
+        # first learn the test case's project.
+        if (status_id is None and status is not None) or (layer_id is None and layer is not None):
+            pid = _project_id_of(client, test_case_id)
+            if status_id is None and status is not None:
+                status_id, status = _resolve_ref(client, "status", pid, status), None
+            if layer_id is None and layer is not None:
+                layer_id, layer = _resolve_ref(client, "layer", pid, layer), None
+        raw = {
+            "name": name,
+            "description": description,
+            "precondition": precondition,
+            "expected_result": expected_result,
+            "automated": automated,
+            "status_id": status_id,
+            "layer_id": layer_id,
+            "tags": tags,
+        }
         body = _build_testcase_body(raw, mode="update")
         updated = _patch_or_put(client, f"/testcase/{test_case_id}", body) or {}
         updated_fields = [k for k in _CALLER_FIELDS if raw.get(k) is not None]
