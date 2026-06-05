@@ -5,6 +5,16 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-06-05
+
+Milestone v0.8 — custom-field schema discovery.
+
+### Added
+- **`allure_list_custom_fields`** — list a project's custom-field schema (`field_id`, `name`, `single_select`, `required`) via `GET /api/rs/cf`. The schema-discovery counterpart to `allure_get_test_case_custom_fields`. Built-in metadata fields (Epic/Feature/Story/Component/Suite) use negative ids; project-specific fields use positive ids. Default server now exposes **11** read-only tools (was 10).
+
+### Notes
+- A custom-field **write** tool (`set custom field value`) was scoped and investigated but **deliberately not shipped**: live probing showed the `POST /testcase/{id}/cfv` body shape is not yet confirmed (bare `[{id}]` → 500; `[{id,name,customField}]` → 400) and custom fields are project-scoped in a way that needs careful per-project resolution. Shipping an unverified write path was rejected on quality grounds; it remains a candidate for a future release once the POST contract is confirmed.
+
 ## [0.7.0] — 2026-06-05
 
 Milestone v0.7 — test-case custom fields, plus the first **live end-to-end verification of the write tools**.

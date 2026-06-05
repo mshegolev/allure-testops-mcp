@@ -221,6 +221,21 @@ class CustomFieldsOutput(TypedDict):
     custom_fields: list[CustomFieldValueRef]
 
 
+class CustomFieldDef(TypedDict):
+    """A custom field defined on a project (its schema, not a value)."""
+
+    field_id: int
+    name: str
+    single_select: bool
+    required: bool
+
+
+class CustomFieldDefsOutput(TypedDict):
+    project_id: int
+    count: int
+    custom_fields: list[CustomFieldDef]
+
+
 # ── Test-case writes (opt-in via ALLURE_ENABLE_WRITE) ───────────────────────
 
 

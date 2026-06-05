@@ -87,3 +87,28 @@ def test_list_statuses_empty_project(patched_client, http):
     http.add(responses.GET, f"{BASE}/api/rs/status", json={"content": [], "totalPages": 1})
     result = allure_list_statuses(project_id=63).structuredContent
     assert result == {"project_id": 63, "count": 0, "statuses": []}
+
+
+# ── allure_list_custom_fields ────────────────────────────────────────────────
+
+
+def test_list_custom_fields_flattens_definition(patched_client, http):
+    from allure_testops_mcp.tools import allure_list_custom_fields
+
+    http.add(
+        responses.GET,
+        f"{BASE}/api/rs/cf",
+        json=[
+            {"id": -1, "name": "Epic", "singleSelect": False, "required": False, "customField": {"id": -1}},
+            {"id": 87, "name": "Priority", "singleSelect": True, "required": True, "customField": {"id": 87}},
+        ],
+    )
+    result = allure_list_custom_fields(project_id=1664).structuredContent
+    assert result["project_id"] == 1664
+    assert result["count"] == 2
+    assert result["custom_fields"][1] == {
+        "field_id": 87,
+        "name": "Priority",
+        "single_select": True,
+        "required": True,
+    }
