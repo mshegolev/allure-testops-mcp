@@ -1,9 +1,10 @@
 """MCP tools for Allure TestOps.
 
-10 read-only tools covering the main REST API surface — projects, launches,
-test cases (list + single-case detail + custom fields), test results, and
-reference data (statuses, layers). All tools declare ``readOnlyHint: True`` so
-MCP clients do not ask for per-call confirmation.
+11 read-only tools covering the main REST API surface — projects, launches,
+test cases (list + single-case detail + custom-field values), test results,
+and reference data (statuses, layers, custom-field definitions). All tools
+declare ``readOnlyHint: True`` so MCP clients do not ask for per-call
+confirmation.
 
 **Threading model.**
 
@@ -29,6 +30,8 @@ from pydantic import Field
 from allure_testops_mcp import output
 from allure_testops_mcp._mcp import get_client, mcp, pagination_from
 from allure_testops_mcp.models import (
+    CustomFieldDef,
+    CustomFieldDefsOutput,
     CustomFieldsOutput,
     CustomFieldValueRef,
     FailedTestsOutput,
@@ -951,3 +954,50 @@ def allure_get_test_case_custom_fields(
         return output.ok(result, f"## Custom fields for TC #{test_case_id} ({len(fields)})\n\n{md}")  # type: ignore[return-value]
     except Exception as exc:
         output.fail(exc, f"getting custom fields for test case {test_case_id}")
+
+
+@mcp.tool(
+    name="allure_list_custom_fields",
+    annotations={
+        "title": "List Custom Fields",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_list_custom_fields(
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+) -> CustomFieldDefsOutput:
+    """List the custom fields defined on a project (its schema).
+
+    Returns each field's ``field_id``, ``name``, ``single_select`` and
+    ``required``. Use it to discover which custom fields a project has before
+    reading a test case's values with ``allure_get_test_case_custom_fields``.
+    Built-in metadata fields (Epic/Feature/Story/Component/Suite) use negative
+    ids; project-specific custom fields use positive ids.
+    """
+    try:
+        client = get_client()
+        rows = client.get("/cf", {"projectId": project_id}) or []
+        fields: list[CustomFieldDef] = []
+        for row in rows:
+            inner = row.get("customField") or {}
+            fields.append(
+                {
+                    "field_id": int(inner.get("id", row.get("id", 0)) or 0),
+                    "name": row.get("name", inner.get("name", "")),
+                    "single_select": bool(row.get("singleSelect", False)),
+                    "required": bool(row.get("required", False)),
+                }
+            )
+        result: CustomFieldDefsOutput = {
+            "project_id": project_id,
+            "count": len(fields),
+            "custom_fields": fields,
+        }
+        md = "\n".join(f"- **{f['name']}** (#{f['field_id']}){' *required*' if f['required'] else ''}" for f in fields)
+        return output.ok(result, f"## Custom fields in project {project_id} ({len(fields)})\n\n{md or '(none)'}")  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"listing custom fields for project {project_id}")

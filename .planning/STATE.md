@@ -1,14 +1,13 @@
 # STATE
 
-**Milestone:** v0.7 — Custom fields + live write verification
-**Status:** ✅ complete (shipped v0.7.0)
+**Milestone:** v0.8 — Custom-field schema discovery
+**Status:** Phase 1 ✅ complete (v0.8.0); Phase 2 (cf write) ⛔ not shipped (quality gate)
 **Mode:** /gsd-autonomous
 
 ## Progress
-- Phase 1 (custom-fields read tool): ✅ complete (v0.7.0)
-- Phase 2 (live write-path verification): ✅ complete — the deferred v0.4 residual is closed
+- Phase 1 (list custom-field schema): ✅ complete (v0.8.0), live-verified
+- Phase 2 (set custom-field value): ⛔ not shipped — POST /cfv contract unconfirmed; held on quality grounds
 
 ## Last session
-2026-06-05 — Found write-capable SA token (sa0000jiraqaqueue) in vault; ran the live write
-integration suite to green against project 2031 (user-authorized, ephemeral token). Shipped the
-custom-fields read tool. Write stack now fully verified end-to-end.
+2026-06-05 — Shipped allure_list_custom_fields. Investigated cf-write empirically with the write token;
+POST /cfv body shape unconfirmed (500/400) → refused to ship unverified write tool.
