@@ -95,6 +95,34 @@ def test_build_body_empty_when_all_none():
     assert _build_testcase_body({"name": None, "status": None, "tags": None}) == {}
 
 
+# ── status/layer shapes differ by operation (create nested-id vs update flat-id) ──
+
+
+def test_build_body_create_uses_nested_id_objects():
+    body = _build_testcase_body({"status_id": 3, "layer_id": 9}, mode="create")
+    assert body == {"status": {"id": 3}, "layer": {"id": 9}}
+
+
+def test_build_body_update_uses_flat_ids():
+    body = _build_testcase_body({"status_id": 3, "layer_id": 9}, mode="update")
+    assert body == {"statusId": 3, "testLayerId": 9}
+
+
+def test_build_body_id_takes_precedence_over_name():
+    body = _build_testcase_body({"status": "Draft", "status_id": 3}, mode="create")
+    assert body == {"status": {"id": 3}}
+
+
+def test_build_body_update_rejects_status_name():
+    with pytest.raises(ValueError, match="status id, not a name"):
+        _build_testcase_body({"status": "Active"}, mode="update")
+
+
+def test_build_body_update_rejects_layer_name():
+    with pytest.raises(ValueError, match="layer id, not a name"):
+        _build_testcase_body({"layer": "API"}, mode="update")
+
+
 # ── allure_create_test_case ─────────────────────────────────────────────────
 
 
@@ -182,10 +210,10 @@ def test_update_test_case_reports_all_updated_fields(patched_client, http):
         test_case_id=12,
         name="n",
         automated=True,
-        status="Active",
+        status_id=7,
         tags=["smoke"],
     )
-    assert set(result.structuredContent["updated_fields"]) == {"name", "automated", "status", "tags"}
+    assert set(result.structuredContent["updated_fields"]) == {"name", "automated", "status_id", "tags"}
 
 
 def test_update_test_case_rejects_empty_update(patched_client):
@@ -228,6 +256,39 @@ def test_update_does_not_fall_back_on_non_405(patched_client, http):
         allure_update_test_case(test_case_id=7, name="x")
     # Only the PATCH was attempted — no silent PUT fallback on conflict.
     assert [c.request.method for c in http.calls] == ["PATCH"]
+
+
+def test_update_sends_flat_status_and_layer_ids(patched_client, http):
+    captured: dict[str, object] = {}
+
+    def cb(request):
+        captured["body"] = request.body
+        return (200, {}, '{"id": 7, "name": "n"}')
+
+    http.add_callback(responses.PATCH, f"{BASE}/api/rs/testcase/7", callback=cb)
+    allure_update_test_case(test_case_id=7, status_id=3, layer_id=9)
+    # Flat ids per the TestCasePatch DTO — not nested name objects.
+    assert captured["body"] == b'{"statusId": 3, "testLayerId": 9}'
+
+
+def test_update_rejects_status_name_with_actionable_error(patched_client):
+    with pytest.raises(ToolError) as exc_info:
+        allure_update_test_case(test_case_id=7, status="Active")
+    assert "status_id" in str(exc_info.value)
+
+
+def test_create_sends_nested_status_and_layer_ids(patched_client, http):
+    captured: dict[str, object] = {}
+
+    def cb(request):
+        captured["body"] = request.body
+        return (201, {}, '{"id": 1, "name": "TC"}')
+
+    http.add_callback(responses.POST, f"{BASE}/api/rs/testcase", callback=cb)
+    allure_create_test_case(project_id=1, name="TC", status_id=3, layer_id=9)
+    # Nested id objects per the TestCase DTO.
+    expected = b'{"projectId": 1, "name": "TC", "automated": false, "status": {"id": 3}, "layer": {"id": 9}}'
+    assert captured["body"] == expected
 
 
 # ── allure_delete_test_case ─────────────────────────────────────────────────
