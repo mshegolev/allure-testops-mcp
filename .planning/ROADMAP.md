@@ -6,7 +6,7 @@ Derived from the "Open questions / deferred" section of
 
 | # | Phase | Status | One-liner |
 |---|-------|--------|-----------|
-| 1 | Name→ID lookup for status/layer | ⛔ blocked | Resolve status/layer names to Allure IDs before write |
+| 1 | Name→ID lookup for status/layer | 🟡 partial | ID-based write shipped (v0.4.1); name→id auto-resolution pending live creds |
 | 2 | Live-instance integration tests | ✅ complete | Gated pytest suite exercising create/update/delete against a real Allure project |
 | 3 | Version single-source-of-truth | ✅ complete | Eliminate 3-place version drift; CI asserts consistency |
 | 4 | Harden update verb (PATCH vs PUT) | ✅ complete | Runtime 405→PUT fallback so update survives Allure version differences |

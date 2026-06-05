@@ -5,6 +5,19 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.1] — 2026-06-05
+
+Milestone v0.4 Phase 1 (partial) — corrected status/layer write shapes. Verified against the official Allure client (`eroshenkoam/allure-testops-utils`): the `TestCase` (create) and `TestCasePatch` (update) DTOs use **different** shapes for status/layer. Full name→id auto-resolution remains pending live-instance verification.
+
+### Fixed
+- **`allure_update_test_case` sent the wrong status/layer shape.** Allure's update payload (`TestCasePatch`) addresses status and layer by flat numeric ids (`statusId`, `testLayerId`) and has no nested name field — so the previous `{"status": {"name": …}}` was silently ignored. Update now emits the correct flat ids, and a status/layer *name* on update raises an actionable error pointing to `status_id` / `layer_id` instead of no-oping.
+
+### Added
+- `status_id` / `layer_id` parameters on both `allure_create_test_case` and `allure_update_test_case`. Create sends them as Allure's nested id objects (`{"status": {"id": …}}`); update sends flat ids. `status_id` / `layer_id` take precedence over the name variants.
+
+### Changed
+- On **create**, `status` / `layer` *names* remain supported as best-effort (`{"name": …}`); deployments that require ids surface Allure's 400 as before. Prefer `status_id` / `layer_id` for reliability.
+
 ## [0.4.0] — 2026-06-05
 
 Milestone v0.4 — quality & robustness hardening. Three of four planned phases shipped; the name→ID lookup phase is blocked pending live-instance verification (see `.planning/ROADMAP.md`).

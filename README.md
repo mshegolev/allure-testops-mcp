@@ -44,8 +44,8 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 
 Off by default — the server is read-only unless you set `ALLURE_ENABLE_WRITE=true`. When enabled, three more tools register, giving an agent full create / update / delete over test cases:
 
-- `allure_create_test_case` — create a TC in a project (`project_id`, `name`, plus optional `description`, `precondition`, `expected_result`, `automated`, `status`, `layer`, `tags`)
-- `allure_update_test_case` — partial update; only the fields you pass are changed, the rest are left untouched
+- `allure_create_test_case` — create a TC in a project (`project_id`, `name`, plus optional `description`, `precondition`, `expected_result`, `automated`, `status`/`status_id`, `layer`/`layer_id`, `tags`)
+- `allure_update_test_case` — partial update; only the fields you pass are changed, the rest are left untouched. Status/layer are addressed by **numeric id** on update (`status_id` / `layer_id`) — Allure's update payload has no nested name field, so a status/layer *name* is rejected with an actionable error rather than silently ignored.
 - `allure_delete_test_case` — **permanent** delete; carries `destructiveHint: True` (compliant clients ask for confirmation) **and** requires an explicit `confirm=true` argument as a second guard
 
 Without the flag these tools are never imported, so the agent doesn't even see them — see [Security considerations](#security-considerations).

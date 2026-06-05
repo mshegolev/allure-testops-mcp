@@ -39,16 +39,30 @@ from allure_testops_mcp.models import (
 )
 
 
-def _build_testcase_body(fields: dict[str, Any]) -> dict[str, Any]:
-    """Map MCP-flat inputs to Allure REST body shape.
+def _build_testcase_body(fields: dict[str, Any], *, mode: str = "create") -> dict[str, Any]:
+    """Map MCP-flat inputs to the Allure REST body shape for ``mode``.
 
-    Drops ``None`` values so PATCH stays partial. Wraps named-ref fields
-    (``status``, ``layer``, ``tags``) into Allure's ``{"name": ...}`` /
-    ``[{"name": ...}]`` shape. Other fields pass through (with a
-    snake_case → camelCase rename for the keys Allure expects).
+    Allure's create and update endpoints take *different* shapes for status
+    and layer — verified against the official Allure client
+    (``eroshenkoam/allure-testops-utils``):
+
+    * **create** (``POST /testcase`` — ``TestCase`` DTO) uses nested objects:
+      ``status: {"id": …}`` / ``layer: {"id": …}`` (or ``{"name": …}`` as a
+      best-effort when only a name is known).
+    * **update** (``PATCH /testcase/{id}`` — ``TestCasePatch`` DTO) uses flat
+      numeric ids: ``statusId`` and ``testLayerId``. The patch DTO has *no*
+      nested status/layer field, so a name cannot be sent on update — callers
+      must pass ``status_id`` / ``layer_id``.
+
+    ``status_id`` / ``layer_id`` take precedence over the name variants.
+    Drops ``None`` values so PATCH stays partial. Tags are always
+    ``[{"name": …}]`` (the ``TestTag`` shape).
+
+    Raises:
+        ValueError: if a status/layer *name* (not id) is given in update mode.
     """
     out: dict[str, Any] = {}
-    # Deterministic field order: project, name, scalars, automated, named refs, tags.
+    # Deterministic field order: project, name, scalars, automated, refs, tags.
     if fields.get("project_id") is not None:
         out["projectId"] = fields["project_id"]
     if fields.get("name") is not None:
@@ -61,13 +75,42 @@ def _build_testcase_body(fields: dict[str, Any]) -> dict[str, Any]:
         out["expectedResult"] = fields["expected_result"]
     if fields.get("automated") is not None:
         out["automated"] = fields["automated"]
-    if fields.get("status") is not None:
-        out["status"] = {"name": fields["status"]}
-    if fields.get("layer") is not None:
-        out["layer"] = {"name": fields["layer"]}
+
+    _apply_ref(out, mode, kind="status", ref_id=fields.get("status_id"), name=fields.get("status"))
+    _apply_ref(out, mode, kind="layer", ref_id=fields.get("layer_id"), name=fields.get("layer"))
+
     if fields.get("tags") is not None:
         out["tags"] = [{"name": t} for t in fields["tags"]]
     return out
+
+
+# Per-operation field names for the two named refs (verified against the
+# Allure ``TestCase`` / ``TestCasePatch`` DTOs).
+_UPDATE_ID_KEY = {"status": "statusId", "layer": "testLayerId"}
+_CREATE_OBJ_KEY = {"status": "status", "layer": "layer"}
+
+
+def _apply_ref(out: dict[str, Any], mode: str, *, kind: str, ref_id: int | None, name: str | None) -> None:
+    """Emit the status/layer reference into ``out`` using the right shape.
+
+    id wins over name. On update, only ids are valid (the patch DTO has no
+    nested name field); a name raises so the caller gets an actionable error
+    instead of a silently-ignored payload.
+    """
+    if ref_id is not None:
+        if mode == "update":
+            out[_UPDATE_ID_KEY[kind]] = ref_id
+        else:
+            out[_CREATE_OBJ_KEY[kind]] = {"id": ref_id}
+        return
+    if name is not None:
+        if mode == "update":
+            raise ValueError(
+                f"Allure's test-case update API takes a numeric {kind} id, not a name — "
+                f"pass {kind}_id=<id>. (Name→id auto-resolution is not yet available; "
+                f"look up the id in Allure or via the project's {kind} list.)"
+            )
+        out[_CREATE_OBJ_KEY[kind]] = {"name": name}
 
 
 # Keys the *caller* speaks (snake_case, unwrapped). Used to report
@@ -79,7 +122,9 @@ _CALLER_FIELDS = (
     "expected_result",
     "automated",
     "status",
+    "status_id",
     "layer",
+    "layer_id",
     "tags",
 )
 
@@ -144,16 +189,26 @@ def allure_create_test_case(
         Field(
             default=None,
             max_length=100,
-            description="Status name in this project (e.g. 'Draft', 'Active'). Must exist server-side.",
+            description="Status name in this project (e.g. 'Draft', 'Active'). Must exist server-side. "
+            "Prefer status_id if you know the numeric id.",
         ),
+    ] = None,
+    status_id: Annotated[
+        int | None,
+        Field(default=None, ge=1, le=2_147_483_647, description="Numeric status id (takes precedence over status)."),
     ] = None,
     layer: Annotated[
         str | None,
         Field(
             default=None,
             max_length=100,
-            description="Layer name (e.g. 'API', 'E2E'). Must exist server-side.",
+            description="Layer name (e.g. 'API', 'E2E'). Must exist server-side. "
+            "Prefer layer_id if you know the numeric id.",
         ),
+    ] = None,
+    layer_id: Annotated[
+        int | None,
+        Field(default=None, ge=1, le=2_147_483_647, description="Numeric layer id (takes precedence over layer)."),
     ] = None,
     tags: Annotated[
         list[str] | None,
@@ -169,6 +224,10 @@ def allure_create_test_case(
     Requires ``ALLURE_ENABLE_WRITE=true`` to be set when the server starts —
     otherwise this tool is not registered. Surfaces the Allure 400 / 409
     error text on rejection (e.g. unknown status/layer name, duplicate).
+
+    Status and layer can be set by ``status_id`` / ``layer_id`` (the reliable
+    way — sent as Allure's nested id objects) or by ``status`` / ``layer``
+    name (best-effort; some deployments require ids and answer 400).
 
     Examples:
         - "Create a Draft TC named 'Login flow' in project 63" ->
@@ -188,9 +247,12 @@ def allure_create_test_case(
                 "expected_result": expected_result,
                 "automated": automated,
                 "status": status,
+                "status_id": status_id,
                 "layer": layer,
+                "layer_id": layer_id,
                 "tags": tags,
-            }
+            },
+            mode="create",
         )
         created = client.post("/testcase", body) or {}
         new_id = int(created.get("id", 0))
@@ -229,8 +291,22 @@ def allure_update_test_case(
     precondition: Annotated[str | None, Field(default=None, max_length=10_000)] = None,
     expected_result: Annotated[str | None, Field(default=None, max_length=10_000)] = None,
     automated: Annotated[bool | None, Field(default=None)] = None,
-    status: Annotated[str | None, Field(default=None, max_length=100)] = None,
-    layer: Annotated[str | None, Field(default=None, max_length=100)] = None,
+    status_id: Annotated[
+        int | None,
+        Field(default=None, ge=1, le=2_147_483_647, description="Numeric status id. Update is by id, not name."),
+    ] = None,
+    layer_id: Annotated[
+        int | None,
+        Field(default=None, ge=1, le=2_147_483_647, description="Numeric layer id. Update is by id, not name."),
+    ] = None,
+    status: Annotated[
+        str | None,
+        Field(default=None, max_length=100, description="Status name — rejected on update; use status_id instead."),
+    ] = None,
+    layer: Annotated[
+        str | None,
+        Field(default=None, max_length=100, description="Layer name — rejected on update; use layer_id instead."),
+    ] = None,
     tags: Annotated[list[str] | None, Field(default=None, max_length=50)] = None,
 ) -> TestCaseUpdated:
     """Partially update an existing test case.
@@ -239,9 +315,15 @@ def allure_update_test_case(
     untouched. Pass ``tags=[]`` to clear every tag; omit ``tags`` to leave
     them as-is. Requires ``ALLURE_ENABLE_WRITE=true``.
 
+    Allure's update API addresses status and layer by **numeric id** — pass
+    ``status_id`` / ``layer_id``. Passing a ``status`` / ``layer`` *name* on
+    update raises (the update payload has no nested name field), so look up
+    the id rather than relying on a name that would be silently ignored.
+
     Examples:
         - "Rename TC 555 to 'Login (rewritten)'" -> ``test_case_id=555, name="Login (rewritten)"``
         - "Mark TC 555 automated" -> ``test_case_id=555, automated=True``
+        - "Set TC 555 status to id 3" -> ``test_case_id=555, status_id=3``
     """
     raw = {
         "name": name,
@@ -250,7 +332,9 @@ def allure_update_test_case(
         "expected_result": expected_result,
         "automated": automated,
         "status": status,
+        "status_id": status_id,
         "layer": layer,
+        "layer_id": layer_id,
         "tags": tags,
     }
     if all(v is None for v in raw.values()):
@@ -262,7 +346,7 @@ def allure_update_test_case(
         output.fail(ValueError("each tag must be 100 characters or fewer"), f"updating test case {test_case_id}")
     try:
         client = get_client()
-        body = _build_testcase_body(raw)
+        body = _build_testcase_body(raw, mode="update")
         updated = _patch_or_put(client, f"/testcase/{test_case_id}", body) or {}
         updated_fields = [k for k in _CALLER_FIELDS if raw.get(k) is not None]
         result: TestCaseUpdated = {
