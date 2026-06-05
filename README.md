@@ -13,6 +13,7 @@ results and reference data through the Allure REST API.
 
 - **Stack:** Python 3.10+, [FastMCP](https://github.com/modelcontextprotocol/python-sdk), **stdio** transport.
 - **Compatibility:** any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-prem (API at `/api/rs`).
+- **Instance-wide — all projects at once:** one connection serves every project on the instance. The server isn't pinned to a single project — discover them with `allure_list_projects`, then pass any `project_id`. No reconfiguration to switch or compare projects.
 - **Corporate-friendly:** API-token auth, optional SSL-verify toggle, deliberate proxy bypass.
 - **Safe by default:** 11 read-only tools; the 3 write tools are off unless you opt in.
 
@@ -172,6 +173,7 @@ Read-only:
 - "Show the last 10 launches for project 63"
 - "Failed tests in the last launch for project 175"
 - "What's the automation rate for project 842?"
+- "Compare the automation rate of project 63 and project 842" — works across projects in one session
 - "Show me the steps of test case 641012"
 - "Which custom fields does project 1664 have?"
 

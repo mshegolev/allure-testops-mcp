@@ -5,6 +5,13 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-06-05
+
+Documentation — no code or API changes.
+
+### Changed
+- **README:** documented that the server is **instance-wide** — one connection works with every project on the Allure instance (discover via `allure_list_projects`, then pass any `project_id`), with no per-project reconfiguration. Added a cross-project example prompt. This was already the behaviour; it is now explicit.
+
 ## [0.8.1] — 2026-06-05
 
 Documentation polish for public use — no code or API changes.
