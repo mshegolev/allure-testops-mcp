@@ -170,6 +170,38 @@ class TestCasesListOutput(TypedDict):
     test_cases: list[TestCaseSummary]
 
 
+class TestCaseStepFlat(TypedDict):
+    """One scenario step, flattened. ``depth`` is the nesting level (0 = top).
+
+    The Allure scenario tree is recursive; flattening with a depth marker keeps
+    the structured-output schema simple while preserving the hierarchy for
+    rendering.
+    """
+
+    depth: int
+    keyword: str
+    name: str
+    expected_result: str
+
+
+class TestCaseDetail(TypedDict):
+    """Full single-test-case view. Empty optional fields collapse to "" / []."""
+
+    id: int
+    name: str
+    project_id: int
+    automated: bool
+    description: str
+    precondition: str
+    expected_result: str
+    status: str
+    layer: str
+    tags: list[str]
+    created_by: str
+    last_modified_by: str
+    steps: list[TestCaseStepFlat]
+
+
 # ── Test-case writes (opt-in via ALLURE_ENABLE_WRITE) ───────────────────────
 
 

@@ -26,6 +26,7 @@ READ_ONLY_TOOL_NAMES = {
     "allure_list_test_cases",
     "allure_list_statuses",
     "allure_list_layers",
+    "allure_get_test_case",
 }
 WRITE_TOOL_NAMES = {
     "allure_create_test_case",
