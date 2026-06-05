@@ -202,6 +202,25 @@ class TestCaseDetail(TypedDict):
     steps: list[TestCaseStepFlat]
 
 
+class CustomFieldValueRef(TypedDict):
+    """One custom-field value set on a test case.
+
+    Allure's ``/cfv`` row carries the value (``id`` / ``name``) and the field
+    it belongs to (``customField.id`` / ``customField.name``); we flatten both.
+    """
+
+    field_id: int
+    field_name: str
+    value_id: int
+    value_name: str
+
+
+class CustomFieldsOutput(TypedDict):
+    test_case_id: int
+    count: int
+    custom_fields: list[CustomFieldValueRef]
+
+
 # ── Test-case writes (opt-in via ALLURE_ENABLE_WRITE) ───────────────────────
 
 

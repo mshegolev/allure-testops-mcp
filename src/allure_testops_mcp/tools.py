@@ -1,9 +1,9 @@
 """MCP tools for Allure TestOps.
 
-9 read-only tools covering the main REST API surface — projects, launches,
-test cases (list + single-case detail), test results, and reference data
-(statuses, layers). All tools declare ``readOnlyHint: True`` so MCP clients do
-not ask for per-call confirmation.
+10 read-only tools covering the main REST API surface — projects, launches,
+test cases (list + single-case detail + custom fields), test results, and
+reference data (statuses, layers). All tools declare ``readOnlyHint: True`` so
+MCP clients do not ask for per-call confirmation.
 
 **Threading model.**
 
@@ -29,6 +29,8 @@ from pydantic import Field
 from allure_testops_mcp import output
 from allure_testops_mcp._mcp import get_client, mcp, pagination_from
 from allure_testops_mcp.models import (
+    CustomFieldsOutput,
+    CustomFieldValueRef,
     FailedTestsOutput,
     LaunchesListOutput,
     LaunchSummary,
@@ -899,3 +901,53 @@ def allure_get_test_case(
         return output.ok(result, "\n".join(parts))  # type: ignore[return-value]
     except Exception as exc:
         output.fail(exc, f"getting test case {test_case_id}")
+
+
+# ── Test-case custom fields ─────────────────────────────────────────────────
+
+
+@mcp.tool(
+    name="allure_get_test_case_custom_fields",
+    annotations={
+        "title": "Get Test Case Custom Fields",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_get_test_case_custom_fields(
+    test_case_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure test-case ID.")],
+) -> CustomFieldsOutput:
+    """List the custom-field values set on a test case.
+
+    Returns each value flattened to ``field_id`` / ``field_name`` (the custom
+    field) and ``value_id`` / ``value_name`` (the chosen value) — e.g. field
+    "Priority" → value "High". These are not included in
+    ``allure_get_test_case``; fetch them here when you need a test case's
+    custom-field assignments.
+    """
+    try:
+        client = get_client()
+        rows = client.get(f"/testcase/{test_case_id}/cfv") or []
+        fields: list[CustomFieldValueRef] = []
+        for row in rows:
+            cf = row.get("customField") or {}
+            fields.append(
+                {
+                    "field_id": int(cf.get("id", 0) or 0),
+                    "field_name": cf.get("name", ""),
+                    "value_id": int(row.get("id", 0) or 0),
+                    "value_name": row.get("name", ""),
+                }
+            )
+        result: CustomFieldsOutput = {
+            "test_case_id": test_case_id,
+            "count": len(fields),
+            "custom_fields": fields,
+        }
+        md = "\n".join(f"- **{f['field_name']}**: {f['value_name']}" for f in fields) or "(no custom fields)"
+        return output.ok(result, f"## Custom fields for TC #{test_case_id} ({len(fields)})\n\n{md}")  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"getting custom fields for test case {test_case_id}")
