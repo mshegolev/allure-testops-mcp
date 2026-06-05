@@ -5,6 +5,13 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-06-05
+
+Documentation polish for public use — no code or API changes.
+
+### Changed
+- **README refactor** for MCP best-practice alignment: added a **Quick start**, a **Tools at a glance** table (all 14 tools with kind + purpose), and a **Contributing** section; fixed the write-tools list grouping; clarified that an Allure `Api-Token` inherits its account's role (a read-only account yields a read-only server regardless of `ALLURE_ENABLE_WRITE`); documented `ALLURE_TEST_PROJECT_ID` and the integration-test workflow. Re-released so the refreshed README ships as the PyPI long description.
+
 ## [0.8.0] — 2026-06-05
 
 Milestone v0.8 — custom-field schema discovery.
