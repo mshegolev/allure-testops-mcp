@@ -26,11 +26,13 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 
 ## Features
 
-6 tools covering everyday Allure TestOps workflows:
+8 read-only tools covering everyday Allure TestOps workflows:
 
 **Discovery**
 - `allure_list_projects` — all projects with ID, name, abbreviation
 - `allure_get_project_statistics` — TC count, automation rate, last launch summary
+- `allure_list_statuses` — a project's test-case statuses (id, name, color); discover valid names/ids before setting a status
+- `allure_list_layers` — a project's test layers (id, name); discover valid names/ids before setting a layer
 
 **Launches & results**
 - `allure_list_launches` — recent launches with pass/fail stats
@@ -162,7 +164,7 @@ With `ALLURE_ENABLE_WRITE=true` you can also drive test-case CRUD in natural lan
 - **Secrets are not echoed back** in tool responses (no `stat.request_headers` dumps, no `session.auth` reflection).
 - **Self-signed SSL** is opt-in via `ALLURE_SSL_VERIFY=false` — the default is `true`. Disabling verification on a public network is a security risk; only use for trusted corporate instances.
 - **Proxy discovery is disabled** (`session.trust_env = False`) — the MCP deliberately ignores `HTTP_PROXY`/`HTTPS_PROXY` env vars so the session cannot be silently routed through an unintended proxy. If your Allure instance is reachable only via proxy, run the MCP in an environment where `requests` can resolve directly.
-- **Write operations are opt-in** — without `ALLURE_ENABLE_WRITE=true` the server registers only the 6 read-only tools and cannot create, modify, or delete anything, even if the API token has write scope. When the flag is set, the three write tools register; `allure_delete_test_case` carries `destructiveHint: True` so compliant MCP clients ask for per-call confirmation, and the tool itself requires an explicit `confirm=true` argument as a belt-and-braces guard.
+- **Write operations are opt-in** — without `ALLURE_ENABLE_WRITE=true` the server registers only the 8 read-only tools and cannot create, modify, or delete anything, even if the API token has write scope. When the flag is set, the three write tools register; `allure_delete_test_case` carries `destructiveHint: True` so compliant MCP clients ask for per-call confirmation, and the tool itself requires an explicit `confirm=true` argument as a belt-and-braces guard.
 - **Input validation via Pydantic** — every tool argument is typed and bounded (IDs must be ≥ 1, pagination capped at 200-500).
 
 ## Rate limits

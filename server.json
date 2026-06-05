@@ -6,12 +6,12 @@
     "url": "https://github.com/mshegolev/allure-testops-mcp",
     "source": "github"
   },
-  "version": "0.4.2",
+  "version": "0.5.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "allure-testops-mcp",
-      "version": "0.4.2",
+      "version": "0.5.0",
       "transport": {
         "type": "stdio"
       },

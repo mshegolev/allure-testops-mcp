@@ -24,6 +24,8 @@ READ_ONLY_TOOL_NAMES = {
     "allure_get_test_results",
     "allure_search_failed_tests",
     "allure_list_test_cases",
+    "allure_list_statuses",
+    "allure_list_layers",
 }
 WRITE_TOOL_NAMES = {
     "allure_create_test_case",

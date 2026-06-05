@@ -48,6 +48,32 @@ class ProjectsListOutput(TypedDict):
     projects: list[ProjectSummary]
 
 
+# ── Reference data (statuses / layers) ──────────────────────────────────────
+
+
+class StatusRef(TypedDict):
+    id: int
+    name: str
+    color: str | None
+
+
+class StatusesListOutput(TypedDict):
+    project_id: int
+    count: int
+    statuses: list[StatusRef]
+
+
+class LayerRef(TypedDict):
+    id: int
+    name: str
+
+
+class LayersListOutput(TypedDict):
+    project_id: int
+    count: int
+    layers: list[LayerRef]
+
+
 class ProjectStatistics(TypedDict):
     """Aggregate statistics for a project.
 
