@@ -5,6 +5,16 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-05
+
+Milestone v0.7 — test-case custom fields, plus the first **live end-to-end verification of the write tools**.
+
+### Added
+- **`allure_get_test_case_custom_fields`** — list the custom-field values set on a test case, flattened to `field_id` / `field_name` / `value_id` / `value_name` (e.g. "Priority" → "Medium"). Not included in `allure_get_test_case`; fetch here for a case's custom-field assignments. Default server now exposes **10** read-only tools (was 9).
+
+### Verified
+- The opt-in write tools (`allure_create_test_case` / `allure_update_test_case` / `allure_delete_test_case`) and the status/layer name→id resolver are now **verified live end-to-end** against a real Allure TestOps instance — a full create→update→delete lifecycle and name-based status/layer resolution both pass (`tests/integration/test_write_live.py`). This closes the verification gap deferred since v0.4 (a write-scoped token was required and was not available until now).
+
 ## [0.6.0] — 2026-06-05
 
 Milestone v0.6 — single test-case detail. Verified end-to-end against a live Allure TestOps instance.

@@ -15,7 +15,7 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 
 ## Design highlights
 
-- **Tool annotations** — every read tool is marked `readOnlyHint: True` / `openWorldHint: True`. The 9 default tools are read-only; MCP clients won't ask for confirmation. Optional write tools are gated behind `ALLURE_ENABLE_WRITE` (see below) and carry the appropriate `destructiveHint` annotations.
+- **Tool annotations** — every read tool is marked `readOnlyHint: True` / `openWorldHint: True`. The 10 default tools are read-only; MCP clients won't ask for confirmation. Optional write tools are gated behind `ALLURE_ENABLE_WRITE` (see below) and carry the appropriate `destructiveHint` annotations.
 - **Structured output on every tool** — each tool declares a `TypedDict` return type, so FastMCP auto-generates an `outputSchema` and every result carries both `structuredContent` (typed payload) and a pre-rendered markdown text block.
 - **Structured errors** — auth, 404, 403, 429, 5xx, missing-env errors converted to actionable messages (e.g. _"Authentication failed — verify ALLURE_TOKEN has API scope"_).
 - **Pydantic input validation** — every argument has typed constraints (ranges, lengths, literals) auto-exposed as JSON Schema.
@@ -26,7 +26,7 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 
 ## Features
 
-9 read-only tools covering everyday Allure TestOps workflows:
+10 read-only tools covering everyday Allure TestOps workflows:
 
 **Discovery**
 - `allure_list_projects` — all projects with ID, name, abbreviation
@@ -42,6 +42,7 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 **Test cases**
 - `allure_list_test_cases` — test cases with automated/manual filter (each result also carries its layer, e.g. `UNIT` / `API` / `E2E`)
 - `allure_get_test_case` — one test case's full detail: description, precondition, expected result, status/layer, tags, and the manual scenario steps (flattened with a `depth` marker)
+- `allure_get_test_case_custom_fields` — the custom-field values set on a test case (field name/id → value name/id)
 
 **Test-case CRUD — opt-in write tools** _(new in 0.3.0)_
 
@@ -165,7 +166,7 @@ With `ALLURE_ENABLE_WRITE=true` you can also drive test-case CRUD in natural lan
 - **Secrets are not echoed back** in tool responses (no `stat.request_headers` dumps, no `session.auth` reflection).
 - **Self-signed SSL** is opt-in via `ALLURE_SSL_VERIFY=false` — the default is `true`. Disabling verification on a public network is a security risk; only use for trusted corporate instances.
 - **Proxy discovery is disabled** (`session.trust_env = False`) — the MCP deliberately ignores `HTTP_PROXY`/`HTTPS_PROXY` env vars so the session cannot be silently routed through an unintended proxy. If your Allure instance is reachable only via proxy, run the MCP in an environment where `requests` can resolve directly.
-- **Write operations are opt-in** — without `ALLURE_ENABLE_WRITE=true` the server registers only the 9 read-only tools and cannot create, modify, or delete anything, even if the API token has write scope. When the flag is set, the three write tools register; `allure_delete_test_case` carries `destructiveHint: True` so compliant MCP clients ask for per-call confirmation, and the tool itself requires an explicit `confirm=true` argument as a belt-and-braces guard.
+- **Write operations are opt-in** — without `ALLURE_ENABLE_WRITE=true` the server registers only the 10 read-only tools and cannot create, modify, or delete anything, even if the API token has write scope. When the flag is set, the three write tools register; `allure_delete_test_case` carries `destructiveHint: True` so compliant MCP clients ask for per-call confirmation, and the tool itself requires an explicit `confirm=true` argument as a belt-and-braces guard.
 - **Input validation via Pydantic** — every tool argument is typed and bounded (IDs must be ≥ 1, pagination capped at 200-500).
 
 ## Rate limits

@@ -11,7 +11,11 @@ import responses
 
 from allure_testops_mcp import _mcp
 from allure_testops_mcp.client import AllureClient
-from allure_testops_mcp.tools import _flatten_steps, allure_get_test_case
+from allure_testops_mcp.tools import (
+    _flatten_steps,
+    allure_get_test_case,
+    allure_get_test_case_custom_fields,
+)
 
 BASE = "https://allure.test.local"
 
@@ -108,3 +112,33 @@ def test_get_test_case_empty_optionals_collapse(patched_client, http):
     result = allure_get_test_case(test_case_id=9).structuredContent
     assert result["description"] == "" and result["precondition"] == "" and result["layer"] == ""
     assert result["tags"] == [] and result["steps"] == []
+
+
+# ── allure_get_test_case_custom_fields ───────────────────────────────────────
+
+
+def test_get_custom_fields_flattens_field_and_value(patched_client, http):
+    http.add(
+        responses.GET,
+        f"{BASE}/api/rs/testcase/641012/cfv",
+        json=[
+            {"id": 99075, "name": "N/A", "customField": {"id": 168, "name": "Automation status"}},
+            {"id": 41990, "name": "Medium", "customField": {"id": 12, "name": "Priority"}},
+        ],
+    )
+    result = allure_get_test_case_custom_fields(test_case_id=641012).structuredContent
+    assert result["test_case_id"] == 641012
+    assert result["count"] == 2
+    assert result["custom_fields"][0] == {
+        "field_id": 168,
+        "field_name": "Automation status",
+        "value_id": 99075,
+        "value_name": "N/A",
+    }
+    assert result["custom_fields"][1]["field_name"] == "Priority"
+
+
+def test_get_custom_fields_empty(patched_client, http):
+    http.add(responses.GET, f"{BASE}/api/rs/testcase/9/cfv", json=[])
+    result = allure_get_test_case_custom_fields(test_case_id=9).structuredContent
+    assert result == {"test_case_id": 9, "count": 0, "custom_fields": []}
