@@ -1,8 +1,9 @@
 """MCP tools for Allure TestOps.
 
-6 read-only tools covering the main REST API surface — projects, launches,
-test cases, test results. All tools declare ``readOnlyHint: True`` so MCP
-clients do not ask for per-call confirmation.
+8 read-only tools covering the main REST API surface — projects, launches,
+test cases, test results, and reference data (statuses, layers). All tools
+declare ``readOnlyHint: True`` so MCP clients do not ask for per-call
+confirmation.
 
 **Threading model.**
 
@@ -31,9 +32,13 @@ from allure_testops_mcp.models import (
     FailedTestsOutput,
     LaunchesListOutput,
     LaunchSummary,
+    LayerRef,
+    LayersListOutput,
     ProjectsListOutput,
     ProjectStatistics,
     ProjectSummary,
+    StatusesListOutput,
+    StatusRef,
     TestCasesListOutput,
     TestCaseSummary,
     TestResultsOutput,
@@ -707,3 +712,98 @@ async def allure_list_test_cases(
         return output.ok(result, md)  # type: ignore[return-value]
     except Exception as exc:
         output.fail(exc, f"listing test cases for project {project_id}")
+
+
+# ── Reference data: statuses & layers ───────────────────────────────────────
+
+
+def _fetch_all_refs(client, path: str, project_id: int) -> list[dict]:
+    """Fetch every item of a project-scoped reference list, paging through.
+
+    Used by the status/layer list tools. These reference sets are small and
+    bounded, so fetching all pages is cheap and gives the agent the full set
+    in one call.
+    """
+    items: list[dict] = []
+    page = 0
+    while True:
+        data = client.get(path, {"projectId": project_id, "page": page, "size": 100}) or {}
+        content = data.get("content", []) or []
+        items.extend(content)
+        page += 1
+        if page >= int(data.get("totalPages", 1) or 1) or not content:
+            break
+    return items
+
+
+@mcp.tool(
+    name="allure_list_statuses",
+    annotations={
+        "title": "List Statuses",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_list_statuses(
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+) -> StatusesListOutput:
+    """List the test-case statuses defined in a project (id, name, color).
+
+    Use this to discover valid status names/ids before setting a status on
+    ``allure_create_test_case`` / ``allure_update_test_case``. Built-in
+    statuses use negative ids (e.g. Draft = -1).
+
+    Returns:
+        dict with ``project_id``, ``count`` and ``statuses`` (each: ``id``,
+        ``name``, ``color``).
+    """
+    try:
+        client = get_client()
+        statuses: list[StatusRef] = [
+            {"id": int(s["id"]), "name": s.get("name", ""), "color": s.get("color")}
+            for s in _fetch_all_refs(client, "/status", project_id)
+        ]
+        result: StatusesListOutput = {"project_id": project_id, "count": len(statuses), "statuses": statuses}
+        md = "\n".join(f"- **{s['id']}** — {s['name']}" for s in statuses) or "(no statuses)"
+        return output.ok(result, f"## Statuses in project {project_id} ({len(statuses)})\n\n{md}")  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"listing statuses for project {project_id}")
+
+
+@mcp.tool(
+    name="allure_list_layers",
+    annotations={
+        "title": "List Layers",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_list_layers(
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+) -> LayersListOutput:
+    """List the test layers defined in a project (id, name).
+
+    Use this to discover valid layer names/ids before setting a layer on
+    ``allure_create_test_case`` / ``allure_update_test_case``. Built-in
+    layers use negative ids (e.g. API Tests = -3).
+
+    Returns:
+        dict with ``project_id``, ``count`` and ``layers`` (each: ``id``, ``name``).
+    """
+    try:
+        client = get_client()
+        layers: list[LayerRef] = [
+            {"id": int(layer["id"]), "name": layer.get("name", "")}
+            for layer in _fetch_all_refs(client, "/testlayer", project_id)
+        ]
+        result: LayersListOutput = {"project_id": project_id, "count": len(layers), "layers": layers}
+        md = "\n".join(f"- **{layer['id']}** — {layer['name']}" for layer in layers) or "(no layers)"
+        return output.ok(result, f"## Layers in project {project_id} ({len(layers)})\n\n{md}")  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"listing layers for project {project_id}")

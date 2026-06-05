@@ -5,6 +5,15 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-05
+
+Milestone v0.5 — reference-data discovery tools. Read tools verified end-to-end against a live Allure TestOps instance.
+
+### Added
+- **`allure_list_statuses`** — list a project's test-case statuses (`id`, `name`, `color`). Built-in statuses use negative ids (e.g. `Draft = -1`).
+- **`allure_list_layers`** — list a project's test layers (`id`, `name`). Built-in layers use negative ids (e.g. `API Tests = -3`).
+- Both page through all results and complement the v0.4.2 name→id resolver — an agent can discover valid status/layer names/ids before setting one on create/update. The default server now exposes **8** read-only tools (was 6).
+
 ## [0.4.2] — 2026-06-05
 
 Milestone v0.4 **Phase 1 complete** — status/layer name→id auto-resolution. The list endpoints were confirmed against a live Allure TestOps instance: `GET /api/rs/status?projectId=…` and `GET /api/rs/testlayer?projectId=…` (both paged). The resolver was verified live (read path); the write path is DTO-grounded and unit-tested (live mutation needs a write-scoped token).

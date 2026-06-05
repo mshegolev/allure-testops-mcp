@@ -1,18 +1,12 @@
 # STATE
 
-**Milestone:** v0.4 — Quality & robustness hardening
-**Status:** ✅ COMPLETE & ARCHIVED (2026-06-05) — see `.planning/milestones/v0.4/v0.4-MILESTONE-AUDIT.md`
-**Started:** 2026-06-05
-**Mode:** /gsd-autonomous (fully autonomous)
-**Next:** no active milestone — run /gsd-new-milestone to scope v0.5 (candidates in the audit doc)
+**Milestone:** v0.5 — Reference-data discovery tools
+**Status:** Phase 1 ✅ complete (shipped v0.5.0); milestone effectively done (1 phase)
+**Mode:** /gsd-autonomous
 
-## Progress — milestone v0.4 COMPLETE (4/4 phases)
-- Phase 3 (Version SSOT): ✅ complete (v0.4.0)
-- Phase 4 (Update verb hardening): ✅ complete (v0.4.0)
-- Phase 2 (Live integration tests): ✅ complete (gated) (v0.4.0)
-- Phase 1 (Name→ID lookup): ✅ complete (v0.4.2) — resolver shipped, endpoints confirmed live
+## Progress
+- Phase 1 (List statuses & layers): ✅ complete (v0.5.0), live-verified
 
 ## Last session
-2026-06-05 — Phase 1 closed: live Allure access (via aiqa-core vault token) confirmed the status
-(`/status`) and layer (`/testlayer`) endpoints; shipped the name→id resolver (v0.4.2), verified live
-read-only. Live write mutation deferred — token is read-scoped (HTTP 403). Milestone v0.4 complete.
+2026-06-05 — Scoped v0.5 around read-only reference-data tools (live-verifiable with the read token).
+Shipped allure_list_statuses / allure_list_layers, verified live against real Allure.
