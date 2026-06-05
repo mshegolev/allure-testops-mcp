@@ -44,6 +44,24 @@ def patched_client(monkeypatch):
     return client
 
 
+def _mock_status(http, mapping):
+    """Register GET /status returning {name: id} as a single page."""
+    http.add(
+        responses.GET,
+        f"{BASE}/api/rs/status",
+        json={"content": [{"id": i, "name": n} for n, i in mapping.items()], "totalPages": 1},
+    )
+
+
+def _mock_layer(http, mapping):
+    """Register GET /testlayer returning {name: id} as a single page."""
+    http.add(
+        responses.GET,
+        f"{BASE}/api/rs/testlayer",
+        json={"content": [{"id": i, "name": n} for n, i in mapping.items()], "totalPages": 1},
+    )
+
+
 # ── _build_testcase_body ────────────────────────────────────────────────────
 
 
@@ -123,6 +141,33 @@ def test_build_body_update_rejects_layer_name():
         _build_testcase_body({"layer": "API"}, mode="update")
 
 
+# ── name→id resolver ─────────────────────────────────────────────────────────
+
+
+def test_list_refs_pages_through_all_results(patched_client, http):
+    from allure_testops_mcp.tools_write import _list_refs
+
+    http.add(
+        responses.GET,
+        f"{BASE}/api/rs/status",
+        json={"content": [{"id": -1, "name": "Draft"}, {"id": -3, "name": "Active"}], "totalPages": 2},
+    )
+    http.add(
+        responses.GET,
+        f"{BASE}/api/rs/status",
+        json={"content": [{"id": 5, "name": "Blocked"}], "totalPages": 2},
+    )
+    refs = _list_refs(patched_client, "status", 63)
+    assert refs == {"Draft": -1, "Active": -3, "Blocked": 5}
+
+
+def test_resolve_ref_is_case_insensitive(patched_client, http):
+    from allure_testops_mcp.tools_write import _resolve_ref
+
+    _mock_status(http, {"Draft": -1, "Active": -3})
+    assert _resolve_ref(patched_client, "status", 63, "dRaFt") == -1
+
+
 # ── allure_create_test_case ─────────────────────────────────────────────────
 
 
@@ -133,6 +178,8 @@ def test_create_test_case_happy_path(patched_client, http):
         captured["body"] = request.body
         return (201, {}, '{"id": 555, "name": "Login flow"}')
 
+    _mock_status(http, {"Draft": -1})
+    _mock_layer(http, {"E2E": 99})
     http.add_callback(responses.POST, f"{BASE}/api/rs/testcase", callback=callback)
     result = allure_create_test_case(
         project_id=63,
@@ -149,9 +196,10 @@ def test_create_test_case_happy_path(patched_client, http):
         "project_id": 63,
         "url": f"{BASE}/project/63/test-cases/555",
     }
+    # Names were resolved to ids and sent as Allure's nested id objects.
     assert captured["body"] == (
         b'{"projectId": 63, "name": "Login flow", "description": "checks login", '
-        b'"automated": true, "status": {"name": "Draft"}, "layer": {"name": "E2E"}, '
+        b'"automated": true, "status": {"id": -1}, "layer": {"id": 99}, '
         b'"tags": [{"name": "smoke"}]}'
     )
 
@@ -175,10 +223,24 @@ def test_create_test_case_url_is_null_when_allure_url_missing(monkeypatch, patch
     assert result.structuredContent["url"] is None
 
 
-def test_create_test_case_surfaces_400_as_tool_error(patched_client, http):
-    http.add(responses.POST, f"{BASE}/api/rs/testcase", status=400, body="bad status")
+def test_create_unknown_status_name_errors_before_post(patched_client, http):
+    """An unknown status name fails at resolution with the valid names listed —
+    no POST is attempted."""
+    _mock_status(http, {"Draft": -1, "Active": -3})
     with pytest.raises(ToolError) as exc_info:
         allure_create_test_case(project_id=1, name="x", status="Nonexistent")
+    msg = str(exc_info.value)
+    assert "not found" in msg and "Draft" in msg
+    # Resolution failed -> no test case was created.
+    assert [c.request.method for c in http.calls] == ["GET"]
+
+
+def test_create_surfaces_post_400_as_tool_error(patched_client, http):
+    """A 400 from the create call itself still surfaces as an actionable error."""
+    _mock_status(http, {"Draft": -1})
+    http.add(responses.POST, f"{BASE}/api/rs/testcase", status=400, body="bad payload")
+    with pytest.raises(ToolError) as exc_info:
+        allure_create_test_case(project_id=1, name="x", status="Draft")
     assert "400" in str(exc_info.value) or "Allure" in str(exc_info.value)
 
 
@@ -271,10 +333,30 @@ def test_update_sends_flat_status_and_layer_ids(patched_client, http):
     assert captured["body"] == b'{"statusId": 3, "testLayerId": 9}'
 
 
-def test_update_rejects_status_name_with_actionable_error(patched_client):
+def test_update_resolves_status_name_via_project_lookup(patched_client, http):
+    """A status *name* on update is resolved to its id: fetch the TC's project,
+    look up the status list, then PATCH with the flat statusId."""
+    captured: dict[str, object] = {}
+
+    def patch_cb(request):
+        captured["body"] = request.body
+        return (200, {}, '{"id": 7, "name": "n"}')
+
+    http.add(responses.GET, f"{BASE}/api/rs/testcase/7", json={"id": 7, "projectId": 63})
+    _mock_status(http, {"Active": -3})
+    http.add_callback(responses.PATCH, f"{BASE}/api/rs/testcase/7", callback=patch_cb)
+
+    result = allure_update_test_case(test_case_id=7, status="Active")
+    assert captured["body"] == b'{"statusId": -3}'
+    assert "status_id" in result.structuredContent["updated_fields"]
+
+
+def test_update_unknown_layer_name_errors(patched_client, http):
+    http.add(responses.GET, f"{BASE}/api/rs/testcase/7", json={"id": 7, "projectId": 63})
+    _mock_layer(http, {"API Tests": -3})
     with pytest.raises(ToolError) as exc_info:
-        allure_update_test_case(test_case_id=7, status="Active")
-    assert "status_id" in str(exc_info.value)
+        allure_update_test_case(test_case_id=7, layer="Nope")
+    assert "not found" in str(exc_info.value)
 
 
 def test_create_sends_nested_status_and_layer_ids(patched_client, http):
