@@ -1,8 +1,10 @@
 # STATE
 
 **Milestone:** v0.4 — Quality & robustness hardening
+**Status:** ✅ COMPLETE & ARCHIVED (2026-06-05) — see `.planning/milestones/v0.4/v0.4-MILESTONE-AUDIT.md`
 **Started:** 2026-06-05
 **Mode:** /gsd-autonomous (fully autonomous)
+**Next:** no active milestone — run /gsd-new-milestone to scope v0.5 (candidates in the audit doc)
 
 ## Progress — milestone v0.4 COMPLETE (4/4 phases)
 - Phase 3 (Version SSOT): ✅ complete (v0.4.0)
