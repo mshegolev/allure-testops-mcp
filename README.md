@@ -24,7 +24,7 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 
 ## Features
 
-6 tools covering everyday Allure TestOps workflows:
+8 read-only tools + 7 opt-in write tools covering everyday Allure TestOps workflows:
 
 **Discovery**
 - `allure_list_projects` — all projects with ID, name, abbreviation
@@ -38,10 +38,18 @@ Works with any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-
 **Test cases**
 - `allure_list_test_cases` — test cases with automated/manual filter (each result also carries its layer, e.g. `UNIT` / `API` / `E2E`)
 
+**Defect categories & automation schema**
+- `allure_list_categories` — defect categories (named/coloured buckets) for a project
+- `allure_list_category_matchers` — the regex automation rules (`messageRegex` / `traceRegex` → category) that auto-classify failures at ingest
+
 **Write — opt-in** (set `ALLURE_ENABLE_WRITE=true` to register these)
 - `allure_create_test_case` — create a new test case in a project
 - `allure_update_test_case` — partial update (only the fields you pass are changed)
 - `allure_delete_test_case` — permanent delete; carries `destructiveHint: True` and requires an explicit `confirm=true` flag
+- `allure_create_category` — create a defect category (name + hex colour + description)
+- `allure_delete_category` — permanent delete; `destructiveHint` + `confirm=true`
+- `allure_create_category_matcher` — create a regex rule and attach it to the project's automation schema (the rule that makes a category automatic)
+- `allure_delete_category_matcher` — permanent delete; `destructiveHint` + `confirm=true`
 
 ## Installation
 
@@ -102,7 +110,7 @@ claude mcp list
 | `ALLURE_URL` | yes | Allure TestOps URL (e.g. `https://allure.example.com`) |
 | `ALLURE_TOKEN` | yes | API token from Allure TestOps (Profile → API tokens) |
 | `ALLURE_SSL_VERIFY` | no | `true`/`false`. Set to `false` for self-signed corp certs. Default: `true`. |
-| `ALLURE_ENABLE_WRITE` | no | `true`/`false`. When `true`, registers the three write tools (`allure_create_test_case` / `allure_update_test_case` / `allure_delete_test_case`). Default: `false` — read-only server. |
+| `ALLURE_ENABLE_WRITE` | no | `true`/`false`. When `true`, registers the seven write tools (test-case create/update/delete + category create/delete + matcher create/delete). Default: `false` — read-only server. |
 
 ## Example usage
 

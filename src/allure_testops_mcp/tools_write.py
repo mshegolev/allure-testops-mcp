@@ -32,10 +32,20 @@ from pydantic import Field
 from allure_testops_mcp import output
 from allure_testops_mcp._mcp import get_client, mcp
 from allure_testops_mcp.models import (
+    CategoryCreated,
+    CategoryDeleted,
+    CategoryMatcherCreated,
+    CategoryMatcherDeleted,
     TestCaseCreated,
     TestCaseDeleted,
     TestCaseUpdated,
 )
+
+# Allure category colours are CSS hex (e.g. ``#E67E22``). The server rejects an
+# empty colour with HTTP 409, so the tool defaults to a neutral grey when the
+# caller omits it. The pattern is enforced at the MCP-input boundary.
+_HEX_COLOR_PATTERN = r"^#[0-9A-Fa-f]{6}$"
+_DEFAULT_CATEGORY_COLOR = "#9E9E9E"
 
 
 def _build_testcase_body(fields: dict[str, Any]) -> dict[str, Any]:
@@ -304,3 +314,221 @@ def allure_delete_test_case(
         return output.ok(result, f"Deleted test case **#{test_case_id}**")  # type: ignore[return-value]
     except Exception as exc:
         output.fail(exc, f"deleting test case {test_case_id}")
+
+
+# ── allure_create_category ───────────────────────────────────────────────────
+
+
+@mcp.tool(
+    name="allure_create_category",
+    annotations={
+        "title": "Create Defect Category",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_create_category(
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+    name: Annotated[str, Field(min_length=1, max_length=255, description="Category (bucket) name.")],
+    color: Annotated[
+        str,
+        Field(
+            default=_DEFAULT_CATEGORY_COLOR,
+            pattern=_HEX_COLOR_PATTERN,
+            description="CSS hex colour, e.g. '#E67E22'. Defaults to neutral grey.",
+        ),
+    ] = _DEFAULT_CATEGORY_COLOR,
+    description: Annotated[
+        str | None, Field(default=None, max_length=2_000, description="Free-form description.")
+    ] = None,
+) -> CategoryCreated:
+    """Create a defect category (named, coloured bucket) in a project.
+
+    A category on its own classifies nothing — pair it with a matcher
+    (``allure_create_category_matcher``) to auto-assign failures by regex.
+    Requires ``ALLURE_ENABLE_WRITE=true``. The server rejects an empty colour
+    (HTTP 409), so a default grey is sent when ``color`` is omitted.
+
+    Examples:
+        - "Add a category 'Infra: WireMock down' to project 175" ->
+          ``project_id=175, name="Infra: WireMock down", color="#E67E22"``
+    """
+    try:
+        client = get_client()
+        body: dict[str, Any] = {"name": name, "projectId": project_id, "color": color}
+        if description is not None:
+            body["description"] = description
+        created = client.post("/category", body) or {}
+        new_id = int(created.get("id", 0))
+        result: CategoryCreated = {"id": new_id, "name": created.get("name", name), "project_id": project_id}
+        return output.ok(result, f"Created category **#{new_id}** — {result['name']} in project {project_id}")  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"creating category in project {project_id}")
+
+
+# ── allure_delete_category ───────────────────────────────────────────────────
+
+
+@mcp.tool(
+    name="allure_delete_category",
+    annotations={
+        "title": "Delete Defect Category",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_delete_category(
+    category_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure category ID to delete.")],
+    confirm: Annotated[
+        Literal[True],
+        Field(description="Must be exactly True — guard against accidental deletion."),
+    ],
+) -> CategoryDeleted:
+    """Permanently delete a defect category.
+
+    **Destructive.** Any matchers still pointing at this category are
+    orphaned (they classify nothing). Requires ``ALLURE_ENABLE_WRITE=true``.
+
+    Examples:
+        - "Delete category 377" -> ``category_id=377, confirm=True``
+    """
+    if confirm is not True:
+        output.fail(ValueError("confirm must be exactly True to delete a category"), f"deleting category {category_id}")
+    try:
+        client = get_client()
+        client.delete(f"/category/{category_id}")
+        result: CategoryDeleted = {"id": category_id, "deleted": True}
+        return output.ok(result, f"Deleted category **#{category_id}**")  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"deleting category {category_id}")
+
+
+# ── allure_create_category_matcher ───────────────────────────────────────────
+
+
+@mcp.tool(
+    name="allure_create_category_matcher",
+    annotations={
+        "title": "Create Category Matcher",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_create_category_matcher(
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+    category_id: Annotated[
+        int, Field(ge=1, le=2_147_483_647, description="ID of the category this rule feeds (allure_list_categories).")
+    ],
+    name: Annotated[str, Field(min_length=1, max_length=255, description="Matcher name (usually the category name).")],
+    message_regex: Annotated[
+        str | None,
+        Field(default=None, max_length=4_000, description="Java regex vs the failure message; use (?s)/(?si) flags."),
+    ] = None,
+    trace_regex: Annotated[
+        str | None,
+        Field(default=None, max_length=4_000, description="Java regex matched against the stack trace."),
+    ] = None,
+) -> CategoryMatcherCreated:
+    """Create a regex matcher and attach it to a project's automation schema.
+
+    This is the rule that makes a category *automatic*: at result-ingest time
+    Allure assigns any failure whose message/trace matches to ``category_id``.
+    Two API calls — create the matcher, then attach it to the project; the
+    ``attached`` flag reports whether the second step succeeded. At least one
+    of ``message_regex`` / ``trace_regex`` should be set (a matcher with
+    neither classifies nothing). Requires ``ALLURE_ENABLE_WRITE=true``.
+
+    **Existing-run caveat.** Matchers evaluate at ingest, so a new matcher does
+    NOT retroactively reclassify past launches — it applies from the next run.
+
+    Examples:
+        - "Auto-route ISSO token failures to category 382 in project 175" ->
+          ``project_id=175, category_id=382, name="Auth/ISSO",
+          message_regex="(?s).*(unauthenticated|sign in via ISSO).*"``
+    """
+    if message_regex is None and trace_regex is None:
+        output.fail(
+            ValueError("provide at least one of message_regex / trace_regex — an empty matcher classifies nothing"),
+            f"creating category matcher in project {project_id}",
+        )
+    try:
+        client = get_client()
+        body: dict[str, Any] = {"category": {"id": category_id}, "name": name, "projectId": project_id}
+        if message_regex is not None:
+            body["messageRegex"] = message_regex
+        if trace_regex is not None:
+            body["traceRegex"] = trace_regex
+        created = client.post("/categorymatcher", body) or {}
+        new_id = int(created.get("id", 0))
+        # Attach to the project's automation schema; tolerate "already attached".
+        attached = False
+        if new_id:
+            try:
+                client.post(f"/project/{project_id}/categorymatcher", {"matcherId": new_id})
+                attached = True
+            except Exception:
+                attached = False
+        result: CategoryMatcherCreated = {
+            "id": new_id,
+            "name": created.get("name", name),
+            "project_id": project_id,
+            "category_id": category_id,
+            "attached": attached,
+        }
+        md = f"Created matcher **#{new_id}** — {result['name']} -> category {category_id}"
+        md += " (attached)" if attached else " (created; attach pending)"
+        return output.ok(result, md)  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"creating category matcher in project {project_id}")
+
+
+# ── allure_delete_category_matcher ───────────────────────────────────────────
+
+
+@mcp.tool(
+    name="allure_delete_category_matcher",
+    annotations={
+        "title": "Delete Category Matcher",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_delete_category_matcher(
+    matcher_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure matcher ID to delete.")],
+    confirm: Annotated[
+        Literal[True],
+        Field(description="Must be exactly True — guard against accidental deletion."),
+    ],
+) -> CategoryMatcherDeleted:
+    """Permanently delete a category matcher (regex automation rule).
+
+    **Destructive.** Removing the matcher stops auto-classification into its
+    category from the next run onward; the category bucket itself remains.
+    Requires ``ALLURE_ENABLE_WRITE=true``.
+
+    Examples:
+        - "Delete matcher 278" -> ``matcher_id=278, confirm=True``
+    """
+    if confirm is not True:
+        output.fail(
+            ValueError("confirm must be exactly True to delete a matcher"), f"deleting category matcher {matcher_id}"
+        )
+    try:
+        client = get_client()
+        client.delete(f"/categorymatcher/{matcher_id}")
+        result: CategoryMatcherDeleted = {"id": matcher_id, "deleted": True}
+        return output.ok(result, f"Deleted matcher **#{matcher_id}**")  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"deleting category matcher {matcher_id}")

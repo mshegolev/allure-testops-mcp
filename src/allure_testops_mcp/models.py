@@ -176,3 +176,79 @@ class TestCaseUpdated(TypedDict):
 class TestCaseDeleted(TypedDict):
     id: int
     deleted: bool
+
+
+# ── Defect categories & automation matchers ─────────────────────────────────
+#
+# Allure TestOps splits defect classification into two entities:
+#   * Category        — a named, coloured bucket (`name` / `color` / `description`).
+#   * CategoryMatcher — the regex rule (`messageRegex` / `traceRegex`) that
+#                       auto-assigns failing results to a category at ingest.
+# A Category alone is inert; the Matcher is what makes classification automatic
+# (this is the project's "automation schema" page in the UI).
+
+
+class CategorySummary(TypedDict):
+    id: int
+    name: str
+    color: str
+    description: str
+
+
+class CategoriesListOutput(TypedDict):
+    project_id: int
+    count: int
+    pagination: PaginationMeta
+    categories: list[CategorySummary]
+
+
+class CategoryMatcherSummary(TypedDict):
+    """One regex rule. ``category_id`` / ``category_name`` denote the bucket the
+    rule feeds; both are ``0`` / ``""`` if the matcher is detached from any
+    category (an orphaned rule that classifies nothing)."""
+
+    id: int
+    name: str
+    message_regex: str
+    trace_regex: str
+    category_id: int
+    category_name: str
+
+
+class CategoryMatchersListOutput(TypedDict):
+    project_id: int
+    count: int
+    pagination: PaginationMeta
+    matchers: list[CategoryMatcherSummary]
+
+
+# ── Category / matcher writes (opt-in via ALLURE_ENABLE_WRITE) ──────────────
+
+
+class CategoryCreated(TypedDict):
+    id: int
+    name: str
+    project_id: int
+
+
+class CategoryDeleted(TypedDict):
+    id: int
+    deleted: bool
+
+
+class CategoryMatcherCreated(TypedDict):
+    """Output for :func:`allure_create_category_matcher`. ``attached`` reports
+    whether the matcher was linked to the project's automation schema (the
+    second API step); a matcher that is created but not attached classifies
+    nothing."""
+
+    id: int
+    name: str
+    project_id: int
+    category_id: int
+    attached: bool
+
+
+class CategoryMatcherDeleted(TypedDict):
+    id: int
+    deleted: bool

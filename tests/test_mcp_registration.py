@@ -24,11 +24,17 @@ READ_ONLY_TOOL_NAMES = {
     "allure_get_test_results",
     "allure_search_failed_tests",
     "allure_list_test_cases",
+    "allure_list_categories",
+    "allure_list_category_matchers",
 }
 WRITE_TOOL_NAMES = {
     "allure_create_test_case",
     "allure_update_test_case",
     "allure_delete_test_case",
+    "allure_create_category",
+    "allure_delete_category",
+    "allure_create_category_matcher",
+    "allure_delete_category_matcher",
 }
 
 

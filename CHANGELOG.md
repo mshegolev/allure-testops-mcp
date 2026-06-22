@@ -5,6 +5,20 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-23
+
+### Added
+- Two read-only tools for defect classification — `allure_list_categories` (named/coloured buckets) and `allure_list_category_matchers` (the regex automation rules that auto-assign failures to a category at ingest). These expose a project's "automation schema".
+- Four opt-in write tools (gated behind `ALLURE_ENABLE_WRITE`) — `allure_create_category` / `allure_delete_category` and `allure_create_category_matcher` / `allure_delete_category_matcher`. `create_category_matcher` performs the two-step create-then-attach against `/categorymatcher` + `/project/{id}/categorymatcher` and reports an `attached` flag. Both delete tools carry `destructiveHint: True` and require explicit `confirm=true`.
+- `CategorySummary` / `CategoriesListOutput` / `CategoryMatcherSummary` / `CategoryMatchersListOutput` / `CategoryCreated` / `CategoryDeleted` / `CategoryMatcherCreated` / `CategoryMatcherDeleted` TypedDicts for structured output.
+
+### Fixed
+- `allure_get_test_results` / `allure_search_failed_tests` returned an empty `error` for real failures: the deployment carries the reason in `message` (with the stack in `trace`), while `statusMessage` is always `null`. `_test_result_summary` now reads `message` first and falls back to `statusMessage` / `trace`.
+
+### Notes
+- Allure's project-level `category` records hold only `name` / `color` / `description` — the regex lives in the separate `categorymatcher` entity. A category without a matcher classifies nothing.
+- Matchers evaluate at result-ingest time, so a new/edited matcher does not retroactively reclassify past launches; it applies from the next run.
+
 ## [0.3.0] — 2026-06-05
 
 ### Added
