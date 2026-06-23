@@ -21,7 +21,11 @@ from allure_testops_mcp import _mcp
 from allure_testops_mcp.client import AllureClient
 from allure_testops_mcp.tools_write import (
     _build_testcase_body,
+    allure_create_category,
+    allure_create_category_matcher,
     allure_create_test_case,
+    allure_delete_category,
+    allure_delete_category_matcher,
     allure_delete_test_case,
     allure_update_test_case,
 )
@@ -391,3 +395,114 @@ def test_delete_test_case_surfaces_404(patched_client, http):
     http.add(responses.DELETE, f"{BASE}/api/rs/testcase/9", status=404, body="not found")
     with pytest.raises(ToolError):
         allure_delete_test_case(test_case_id=9, confirm=True)
+
+
+# ── allure_create_category ───────────────────────────────────────────────────
+
+
+def test_create_category_happy_path(patched_client, http):
+    captured: dict[str, object] = {}
+
+    def callback(request):
+        captured["body"] = request.body
+        return (201, {}, '{"id": 377, "name": "Infra"}')
+
+    http.add_callback(responses.POST, f"{BASE}/api/rs/category", callback=callback)
+    result = allure_create_category(project_id=175, name="Infra", color="#E67E22", description="d")
+    assert result.structuredContent == {"id": 377, "name": "Infra", "project_id": 175}
+    assert captured["body"] == (b'{"name": "Infra", "projectId": 175, "color": "#E67E22", "description": "d"}')
+
+
+def test_create_category_defaults_color_when_omitted(patched_client, http):
+    captured: dict[str, object] = {}
+
+    def callback(request):
+        captured["body"] = request.body
+        return (201, {}, '{"id": 1, "name": "X"}')
+
+    http.add_callback(responses.POST, f"{BASE}/api/rs/category", callback=callback)
+    allure_create_category(project_id=1, name="X")
+    assert b'"color": "#9E9E9E"' in captured["body"]  # type: ignore[operator]
+
+
+def test_create_category_surfaces_409(patched_client, http):
+    http.add(responses.POST, f"{BASE}/api/rs/category", status=409, body="color empty")
+    with pytest.raises(ToolError):
+        allure_create_category(project_id=1, name="X", color="#000000")
+
+
+# ── allure_delete_category ───────────────────────────────────────────────────
+
+
+def test_delete_category_happy_path(patched_client, http):
+    http.add(responses.DELETE, f"{BASE}/api/rs/category/377", status=204)
+    result = allure_delete_category(category_id=377, confirm=True)
+    assert result.structuredContent == {"id": 377, "deleted": True}
+
+
+def test_delete_category_rejects_confirm_false(patched_client):
+    with pytest.raises(ToolError, match="confirm"):
+        allure_delete_category(category_id=377, confirm=False)  # type: ignore[arg-type]
+
+
+# ── allure_create_category_matcher ───────────────────────────────────────────
+
+
+def test_create_matcher_happy_path_creates_and_attaches(patched_client, http):
+    captured: dict[str, object] = {}
+
+    def create_cb(request):
+        captured["create"] = request.body
+        return (201, {}, '{"id": 278, "name": "Auth"}')
+
+    def attach_cb(request):
+        captured["attach"] = request.body
+        return (200, {}, "{}")
+
+    http.add_callback(responses.POST, f"{BASE}/api/rs/categorymatcher", callback=create_cb)
+    http.add_callback(responses.POST, f"{BASE}/api/rs/project/175/categorymatcher", callback=attach_cb)
+    result = allure_create_category_matcher(project_id=175, category_id=382, name="Auth", message_regex="(?s).*ISSO.*")
+    assert result.structuredContent == {
+        "id": 278,
+        "name": "Auth",
+        "project_id": 175,
+        "category_id": 382,
+        "attached": True,
+    }
+    assert captured["create"] == (
+        b'{"category": {"id": 382}, "name": "Auth", "projectId": 175, "messageRegex": "(?s).*ISSO.*"}'
+    )
+    assert captured["attach"] == b'{"matcherId": 278}'
+
+
+def test_create_matcher_attach_failure_reported_as_not_attached(patched_client, http):
+    http.add(responses.POST, f"{BASE}/api/rs/categorymatcher", json={"id": 9, "name": "M"}, status=201)
+    http.add(responses.POST, f"{BASE}/api/rs/project/175/categorymatcher", status=500, body="boom")
+    result = allure_create_category_matcher(project_id=175, category_id=1, name="M", trace_regex="x")
+    assert result.structuredContent["attached"] is False
+    assert result.structuredContent["id"] == 9
+
+
+def test_create_matcher_rejects_empty_regex(patched_client):
+    with pytest.raises(ToolError, match="at least one"):
+        allure_create_category_matcher(project_id=175, category_id=1, name="M")
+
+
+def test_create_matcher_surfaces_400(patched_client, http):
+    http.add(responses.POST, f"{BASE}/api/rs/categorymatcher", status=400, body="bad regex")
+    with pytest.raises(ToolError):
+        allure_create_category_matcher(project_id=175, category_id=1, name="M", message_regex="(")
+
+
+# ── allure_delete_category_matcher ───────────────────────────────────────────
+
+
+def test_delete_matcher_happy_path(patched_client, http):
+    http.add(responses.DELETE, f"{BASE}/api/rs/categorymatcher/278", status=204)
+    result = allure_delete_category_matcher(matcher_id=278, confirm=True)
+    assert result.structuredContent == {"id": 278, "deleted": True}
+
+
+def test_delete_matcher_rejects_confirm_false(patched_client):
+    with pytest.raises(ToolError, match="confirm"):
+        allure_delete_category_matcher(matcher_id=278, confirm=False)  # type: ignore[arg-type]

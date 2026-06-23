@@ -5,6 +5,23 @@ All notable changes to `allure-testops-mcp` are documented here. Format follows
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-06-23
+
+Milestone v0.9 — defect categories & the automation schema (regex-driven failure classification).
+
+### Added
+- **`allure_list_categories`** — list a project's defect categories (named/coloured buckets: `name` / `color` / `description`) via `GET /api/rs/project/{id}/category`. Default server now exposes **13** read-only tools (was 11).
+- **`allure_list_category_matchers`** — list a project's regex automation rules (`message_regex` / `trace_regex` → `category_id`/`category_name`) via `GET /api/rs/project/{id}/categorymatcher`. This is the project's "automation schema" — the rules that auto-classify failures at ingest.
+- Four opt-in write tools (gated behind `ALLURE_ENABLE_WRITE`): **`allure_create_category`** / **`allure_delete_category`** and **`allure_create_category_matcher`** / **`allure_delete_category_matcher`**. `create_category_matcher` performs the two-step create-then-attach against `/categorymatcher` + `/project/{id}/categorymatcher` and reports an `attached` flag. Both deletes carry `destructiveHint: True` and require explicit `confirm=true`. The write-tool count is now **7** (was 3).
+- `CategorySummary` / `CategoriesListOutput` / `CategoryMatcherSummary` / `CategoryMatchersListOutput` / `CategoryCreated` / `CategoryDeleted` / `CategoryMatcherCreated` / `CategoryMatcherDeleted` TypedDicts for structured output.
+
+### Fixed
+- **`allure_get_test_results` / `allure_search_failed_tests` returned an empty `error` for real failures.** The `/testresult` projection carries the reason in `message` (with the stack in `trace`), while `statusMessage` is `null` on real deployments. `_test_result_summary` now reads `message` first and falls back to `statusMessage` / `trace`.
+
+### Notes
+- Allure splits the model: a project `category` holds only `name`/`color`/`description`; the regex lives in the separate `categorymatcher` entity. A category without a matcher classifies nothing.
+- Matchers evaluate at result-ingest time, so a new/edited matcher does **not** retroactively reclassify past launches — it applies from the next run.
+
 ## [0.8.2] — 2026-06-05
 
 Documentation — no code or API changes.

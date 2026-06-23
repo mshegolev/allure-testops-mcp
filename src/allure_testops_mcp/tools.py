@@ -1,10 +1,10 @@
 """MCP tools for Allure TestOps.
 
-11 read-only tools covering the main REST API surface — projects, launches,
+13 read-only tools covering the main REST API surface — projects, launches,
 test cases (list + single-case detail + custom-field values), test results,
-and reference data (statuses, layers, custom-field definitions). All tools
-declare ``readOnlyHint: True`` so MCP clients do not ask for per-call
-confirmation.
+reference data (statuses, layers, custom-field definitions), and defect
+categories + automation matchers. All tools declare ``readOnlyHint: True`` so
+MCP clients do not ask for per-call confirmation.
 
 **Threading model.**
 
@@ -30,6 +30,10 @@ from pydantic import Field
 from allure_testops_mcp import output
 from allure_testops_mcp._mcp import get_client, mcp, pagination_from
 from allure_testops_mcp.models import (
+    CategoriesListOutput,
+    CategoryMatchersListOutput,
+    CategoryMatcherSummary,
+    CategorySummary,
     CustomFieldDef,
     CustomFieldDefsOutput,
     CustomFieldsOutput,
@@ -72,16 +76,23 @@ def _launch_stats(launch: dict[str, Any]) -> dict[str, int]:
 def _test_result_summary(r: dict[str, Any]) -> TestResultSummary:
     """Shape a single ``/testresult`` item into :class:`TestResultSummary`.
 
-    Truncates ``statusMessage`` to 300 characters — agents typically need only
+    Truncates the error text to 300 characters — agents typically need only
     the first line or two of the trace to triage a failure; the rest blows
     context.
+
+    **Field note.** Allure's ``/testresult`` projection carries the failure
+    reason in ``message`` (with the stack in ``trace``); the ``statusMessage``
+    key is present in the schema but is ``null`` on this deployment. We read
+    ``message`` first and fall back to ``statusMessage`` / ``trace`` so the
+    ``error`` field is never silently empty for a real failure.
     """
+    error = r.get("message") or r.get("statusMessage") or r.get("trace") or ""
     return {
         "id": int(r["id"]),
         "name": r.get("name", ""),
         "status": r.get("status", ""),
         "duration_ms": int(r.get("duration", 0) or 0),
-        "error": (r.get("statusMessage", "") or "")[:300],
+        "error": error[:300],
     }
 
 
@@ -1001,3 +1012,154 @@ def allure_list_custom_fields(
         return output.ok(result, f"## Custom fields in project {project_id} ({len(fields)})\n\n{md or '(none)'}")  # type: ignore[return-value]
     except Exception as exc:
         output.fail(exc, f"listing custom fields for project {project_id}")
+
+
+# ── Defect categories & automation matchers ─────────────────────────────────
+
+
+def _category_summary(c: dict[str, Any]) -> CategorySummary:
+    """Shape a ``/project/{id}/category`` item into :class:`CategorySummary`."""
+    return {
+        "id": int(c["id"]),
+        "name": c.get("name", ""),
+        "color": c.get("color", ""),
+        "description": c.get("description") or "",
+    }
+
+
+def _matcher_summary(m: dict[str, Any]) -> CategoryMatcherSummary:
+    """Shape a ``/project/{id}/categorymatcher`` item into
+    :class:`CategoryMatcherSummary`.
+
+    Allure nests the target category as ``category: {id, name, ...}``; we
+    flatten it to ``category_id`` / ``category_name``. A detached matcher
+    (``category`` null) collapses to ``0`` / ``""``.
+    """
+    cat = m.get("category") or {}
+    return {
+        "id": int(m["id"]),
+        "name": m.get("name", ""),
+        "message_regex": m.get("messageRegex") or "",
+        "trace_regex": m.get("traceRegex") or "",
+        "category_id": int(cat.get("id", 0) or 0),
+        "category_name": cat.get("name", "") or "",
+    }
+
+
+@mcp.tool(
+    name="allure_list_categories",
+    annotations={
+        "title": "List Defect Categories",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_list_categories(
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+    page: Annotated[int, Field(default=0, ge=0, le=10_000, description="0-based page.")] = 0,
+    size: Annotated[int, Field(default=100, ge=1, le=500, description="Items per page (1-500).")] = 100,
+) -> CategoriesListOutput:
+    """List the defect categories configured for a project.
+
+    Categories are the named, coloured buckets shown on the project's
+    *Categories* settings page (``name`` / ``color`` / ``description``). They
+    are inert on their own — the regex rules that auto-assign failures live
+    in ``allure_list_category_matchers``.
+
+    Args:
+        project_id: Allure project ID.
+        page: 0-based page index.
+        size: Items per page (1-500).
+
+    Returns:
+        dict with keys:
+            - ``project_id`` (int)
+            - ``count`` (int): items in this response
+            - ``pagination`` (dict)
+            - ``categories`` (list): each ``id`` / ``name`` / ``color`` / ``description``
+
+    Examples:
+        - "What defect categories does project 175 have?" -> ``project_id=175``
+
+        Don't use when:
+        - You want the regex automation rules (use ``allure_list_category_matchers``).
+    """
+    try:
+        client = get_client()
+        data = client.get(f"/project/{project_id}/category", {"page": page, "size": size})
+        cats: list[CategorySummary] = [_category_summary(c) for c in data.get("content", [])]
+        result: CategoriesListOutput = {
+            "project_id": project_id,
+            "count": len(cats),
+            "pagination": pagination_from(data),  # type: ignore[typeddict-item]
+            "categories": cats,
+        }
+        md = f"## Categories for project {project_id} ({len(cats)} shown)\n\n" + "\n".join(
+            [f"- **#{c['id']}** {c['name']} (`{c['color']}`)" for c in cats]
+        )
+        return output.ok(result, md)  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"listing categories for project {project_id}")
+
+
+@mcp.tool(
+    name="allure_list_category_matchers",
+    annotations={
+        "title": "List Category Matchers",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": True,
+    },
+    structured_output=True,
+)
+def allure_list_category_matchers(
+    project_id: Annotated[int, Field(ge=1, le=2_147_483_647, description="Allure project ID.")],
+    page: Annotated[int, Field(default=0, ge=0, le=10_000, description="0-based page.")] = 0,
+    size: Annotated[int, Field(default=200, ge=1, le=500, description="Items per page (1-500).")] = 200,
+) -> CategoryMatchersListOutput:
+    """List the regex automation rules (matchers) for a project.
+
+    Each matcher carries a ``message_regex`` / ``trace_regex`` (Java regex)
+    and the ``category_id`` / ``category_name`` it feeds. This is the
+    project's *automation schema* — what makes failing results land in a
+    category automatically at result-ingest time.
+
+    Args:
+        project_id: Allure project ID.
+        page: 0-based page index.
+        size: Items per page (1-500).
+
+    Returns:
+        dict with keys:
+            - ``project_id`` (int)
+            - ``count`` (int)
+            - ``pagination`` (dict)
+            - ``matchers`` (list): each ``id`` / ``name`` / ``message_regex`` /
+              ``trace_regex`` / ``category_id`` / ``category_name``
+
+    Examples:
+        - "Show the auto-classification rules for project 175" -> ``project_id=175``
+
+        Don't use when:
+        - You only need the bucket names/colours (use ``allure_list_categories``).
+    """
+    try:
+        client = get_client()
+        data = client.get(f"/project/{project_id}/categorymatcher", {"page": page, "size": size})
+        matchers: list[CategoryMatcherSummary] = [_matcher_summary(m) for m in data.get("content", [])]
+        result: CategoryMatchersListOutput = {
+            "project_id": project_id,
+            "count": len(matchers),
+            "pagination": pagination_from(data),  # type: ignore[typeddict-item]
+            "matchers": matchers,
+        }
+        md = f"## Category matchers for project {project_id} ({len(matchers)} shown)\n\n" + "\n".join(
+            [f"- **#{m['id']}** {m['name']} -> cat #{m['category_id']} (`{m['message_regex'][:60]}`)" for m in matchers]
+        )
+        return output.ok(result, md)  # type: ignore[return-value]
+    except Exception as exc:
+        output.fail(exc, f"listing category matchers for project {project_id}")

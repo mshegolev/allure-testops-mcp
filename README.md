@@ -15,7 +15,7 @@ results and reference data through the Allure REST API.
 - **Compatibility:** any Allure TestOps instance — SaaS `qameta.io` or self-hosted / on-prem (API at `/api/rs`).
 - **Instance-wide — all projects at once:** one connection serves every project on the instance. The server isn't pinned to a single project — discover them with `allure_list_projects`, then pass any `project_id`. No reconfiguration to switch or compare projects.
 - **Corporate-friendly:** API-token auth, optional SSL-verify toggle, deliberate proxy bypass.
-- **Safe by default:** 11 read-only tools; the 3 write tools are off unless you opt in.
+- **Safe by default:** 13 read-only tools; the 7 write tools are off unless you opt in.
 
 ## Quick start
 
@@ -32,7 +32,7 @@ other clients and [Environment variables](#environment-variables) for all option
 
 ## Tools at a glance
 
-14 tools — 11 read-only (always on) and 3 write tools (opt-in via `ALLURE_ENABLE_WRITE=true`). Every tool
+20 tools — 13 read-only (always on) and 7 write tools (opt-in via `ALLURE_ENABLE_WRITE=true`). Every tool
 carries MCP annotations and returns both a typed `structuredContent` payload and a markdown summary.
 
 | Tool | Kind | Purpose |
@@ -48,9 +48,15 @@ carries MCP annotations and returns both a typed `structuredContent` payload and
 | `allure_list_statuses` | read | A project's statuses (id, name, color) |
 | `allure_list_layers` | read | A project's test layers (id, name) |
 | `allure_list_custom_fields` | read | A project's custom-field schema |
+| `allure_list_categories` | read | Defect categories (named/coloured buckets) |
+| `allure_list_category_matchers` | read | Regex automation rules (message/trace → category) |
 | `allure_create_test_case` | write&nbsp;⚑ | Create a test case |
 | `allure_update_test_case` | write&nbsp;⚑ | Partial update of a test case |
 | `allure_delete_test_case` | write&nbsp;⚑ | Permanent delete (destructive — needs `confirm=true`) |
+| `allure_create_category` | write&nbsp;⚑ | Create a defect category |
+| `allure_delete_category` | write&nbsp;⚑ | Permanent delete (destructive — needs `confirm=true`) |
+| `allure_create_category_matcher` | write&nbsp;⚑ | Create + attach a regex automation rule |
+| `allure_delete_category_matcher` | write&nbsp;⚑ | Permanent delete (destructive — needs `confirm=true`) |
 
 ⚑ Registered only when `ALLURE_ENABLE_WRITE=true`. Without the flag they are never imported, so the agent
 never sees them — see [Security considerations](#security-considerations).
@@ -138,7 +144,7 @@ claude mcp list
 | `ALLURE_URL` | yes | — | Allure TestOps URL (e.g. `https://allure.example.com`) |
 | `ALLURE_TOKEN` | yes | — | API token (Allure → Profile → API tokens) |
 | `ALLURE_SSL_VERIFY` | no | `true` | `true`/`false`. Set `false` for self-signed corp certs |
-| `ALLURE_ENABLE_WRITE` | no | `false` | `true` registers the 3 write tools; default is a read-only server |
+| `ALLURE_ENABLE_WRITE` | no | `false` | `true` registers the 7 write tools; default is a read-only server |
 
 `ALLURE_TEST_PROJECT_ID` (plus optional `ALLURE_TEST_STATUS` / `ALLURE_TEST_LAYER`) are used only by the
 opt-in live integration tests — see [Development](#development).
@@ -193,8 +199,9 @@ With `ALLURE_ENABLE_WRITE=true`, drive test-case CRUD in natural language:
 - **Proxy discovery is disabled** (`session.trust_env = False`) — the server ignores `HTTP_PROXY` /
   `HTTPS_PROXY` so it can't be silently routed through an unintended proxy.
 - **Writes are opt-in and least-privilege** — without `ALLURE_ENABLE_WRITE=true` the server registers only the
-  11 read-only tools and cannot create, modify, or delete anything, even with a write-scoped token. When
-  enabled, `allure_delete_test_case` carries `destructiveHint: True` and requires `confirm=true`.
+  13 read-only tools and cannot create, modify, or delete anything, even with a write-scoped token. When
+  enabled, the destructive tools (`allure_delete_test_case` / `allure_delete_category` /
+  `allure_delete_category_matcher`) carry `destructiveHint: True` and require `confirm=true`.
 - **Input validation via Pydantic** — every argument is typed and bounded; usernames are alphabet-restricted
   to prevent RQL injection through the search endpoint.
 - **A token is never more privileged than its account** — Allure `Api-Token` auth inherits the issuing user's

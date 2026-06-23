@@ -15,7 +15,9 @@ from pydantic import TypeAdapter
 from allure_testops_mcp.models import TestCaseSummary
 from allure_testops_mcp.tools import (
     _build_owner_rql,
+    _category_summary,
     _launch_stats,
+    _matcher_summary,
     _test_case_summary,
     _test_result_summary,
 )
@@ -268,3 +270,64 @@ def test_build_owner_rql_accepts_allure_usernames(username):
 def test_build_owner_rql_rejects_injection_attempts(bad):
     with pytest.raises(ValueError, match="username"):
         _build_owner_rql(bad)
+
+
+# ── _test_result_summary message/trace fallback ─────────────────────────────
+
+
+def test_test_result_summary_prefers_message_over_status_message():
+    # Real Allure deployments carry the reason in ``message``; ``statusMessage``
+    # is null. The summary must surface ``message``, not the empty statusMessage.
+    r = {"id": 1, "message": "AssertionError: Заказ X не в статусе COMPLETED", "statusMessage": None}
+    assert _test_result_summary(r)["error"] == "AssertionError: Заказ X не в статусе COMPLETED"
+
+
+def test_test_result_summary_falls_back_to_trace():
+    r = {"id": 1, "message": None, "statusMessage": None, "trace": "Traceback ... NoBrokersAvailable"}
+    assert _test_result_summary(r)["error"] == "Traceback ... NoBrokersAvailable"
+
+
+# ── _category_summary ────────────────────────────────────────────────────────
+
+
+def test_category_summary_full():
+    c = {"id": 377, "name": "DevOps · Инфра", "color": "#E67E22", "description": "regex: ..."}
+    assert _category_summary(c) == {
+        "id": 377,
+        "name": "DevOps · Инфра",
+        "color": "#E67E22",
+        "description": "regex: ...",
+    }
+
+
+def test_category_summary_null_description():
+    result = _category_summary({"id": 1, "name": "X", "color": "#000000", "description": None})
+    assert result["description"] == ""
+
+
+# ── _matcher_summary ─────────────────────────────────────────────────────────
+
+
+def test_matcher_summary_flattens_category():
+    m = {
+        "id": 278,
+        "name": "Auth/ISSO",
+        "messageRegex": "(?s).*ISSO.*",
+        "traceRegex": None,
+        "category": {"id": 382, "name": "DevOps · Авторизация"},
+    }
+    assert _matcher_summary(m) == {
+        "id": 278,
+        "name": "Auth/ISSO",
+        "message_regex": "(?s).*ISSO.*",
+        "trace_regex": "",
+        "category_id": 382,
+        "category_name": "DevOps · Авторизация",
+    }
+
+
+def test_matcher_summary_detached_category_collapses_to_zero():
+    m = {"id": 9, "name": "orphan", "messageRegex": "(?s).*x.*", "category": None}
+    result = _matcher_summary(m)
+    assert result["category_id"] == 0
+    assert result["category_name"] == ""
